@@ -99,7 +99,7 @@ export const issues = pgTable(
   },
   (table) => ({
     visibilityCheck: check("issues_visibility_check", sql`${table.visibility} in ('open', 'private')`),
-    conversationIdentityIdx: uniqueIndex("issues_conversation_identity_idx").on(table.companyId, table.conversationAgentId, table.conversationUserId),
+    conversationIdentityIdx: index("issues_conversation_identity_idx").on(table.companyId, table.conversationAgentId, table.conversationUserId),
     conversationIdentityCheck: check("issues_conversation_identity_check", sql`(
       ${table.conversationAgentId} is null and ${table.conversationUserId} is null and ${table.conversationState} is null
     ) or (
