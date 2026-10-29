@@ -27,6 +27,7 @@ import {
   issueThreadInteractions,
   issueRecoveryActions,
   issues,
+  projects,
 } from "@paperclipai/db";
 import {
   getEmbeddedPostgresTestSupport,
@@ -137,7 +138,7 @@ const support = await getEmbeddedPostgresTestSupport();
           .returning()
       )[0]!;
     }
-    it("atomically resolves one task per person and agent and excludes it from ordinary lists", async () => {
+    it("atomically resolves one task per person, agent and project and excludes it from ordinary lists", async () => {
       const user = randomUUID();
       expect(
         await issueService(db).getConversation(companyId, agentId, user),
@@ -166,6 +167,52 @@ const support = await getEmbeddedPostgresTestSupport();
       await expect(
         issueService(db).update(results[0].id, { assigneeAgentId: null }),
       ).rejects.toThrow(/conversation/i);
+    });
+    it("keeps several chats per project, filters them in lists, and switches the chat agent", async () => {
+      const owner = randomUUID();
+      const [project] = await db.insert(projects).values({ companyId, name: "Alpha" }).returning();
+      const [other] = await db.insert(agents).values({
+        id: randomUUID(), companyId, name: "Builder", role: "engineer", status: "idle", adapterType: "process",
+      }).returning();
+      await db.insert(companyMemberships).values({
+        companyId, principalType: "user", principalId: owner, status: "active", membershipRole: "operator",
+      });
+      await ensureHumanRoleDefaultGrants(db, { companyId, principalId: owner, membershipRole: "operator", grantedByUserId: null });
+      const app = express();
+      app.use(express.json());
+      app.use((req, _res, next) => {
+        req.actor = { type: "board", source: "session", userId: owner, companyIds: [companyId] };
+        next();
+      });
+      app.use("/api", issueRoutes(db, { wakeup: async () => null } as never));
+      app.use(errorHandler);
+      const path = `/api/companies/${companyId}/chats/${agentId}`;
+
+      const first = (await request(app).post(path).send({ projectId: project.id })).body;
+      expect(first.projectId).toBe(project.id);
+      expect((await request(app).post(path).send({ projectId: project.id })).body.id).toBe(first.id);
+      const second = (await request(app).post(path).send({ projectId: project.id, new: true })).body;
+      expect(second.id).not.toBe(first.id);
+      const loose = (await request(app).post(path).send({})).body;
+      expect(loose.projectId).toBeNull();
+
+      const inProject = await request(app).get(`/api/companies/${companyId}/chats?projectId=${project.id}`);
+      expect(inProject.body.map((chat: { id: string }) => chat.id).sort()).toEqual([first.id, second.id].sort());
+      const noProject = await request(app).get(`/api/companies/${companyId}/chats?projectId=none`);
+      expect(noProject.body.map((chat: { id: string }) => chat.id)).toEqual([loose.id]);
+
+      const svc = issueService(db);
+      const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id);
+      expect(ids(await svc.list(companyId, { projectId: project.id }))).not.toContain(first.id);
+      expect(ids(await svc.list(companyId, { projectId: project.id, chat: "include" }))).toContain(first.id);
+      expect(ids(await svc.list(companyId, { projectId: project.id, chat: "only" }))).toEqual(expect.arrayContaining([first.id, second.id]));
+
+      const switched = await request(app).post(`/api/issues/${first.id}/chat-agent`).send({ agentId: other.id });
+      expect(switched.status).toBe(200);
+      expect(switched.body.conversationAgentId).toBe(other.id);
+      expect(switched.body.assigneeAgentId).toBe(other.id);
+      expect(switched.body.projectId).toBe(project.id);
+      expect((await request(app).post(`/api/issues/${loose.id}/chat-agent`).send({ agentId: "no-such-agent" })).status).toBe(404);
     });
     it("resolves through authenticated company routes, keeps opens read-only, and derives ownership", async () => {
       const appFor = (userId?: string, allowed = true) => {

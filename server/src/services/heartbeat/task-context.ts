@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Db, agents, agentTaskSessions, heartbeatRuns, issueComments } from "@paperclipai/db";
+import { projects, type Db, type agents, type agentTaskSessions, type heartbeatRuns, type issueComments } from "@paperclipai/db";
+import { eq } from "drizzle-orm";
 import { FAST_RESPONSE_AGENT_GUIDANCE, fastResponseHistoryBody } from "@paperclipai/shared";
 import type { PaperclipTurnContext } from "@paperclipai/adapter-utils/server-utils";
 import { parseObject } from "../../adapters/utils.js";
@@ -217,6 +218,10 @@ export async function prepareHeartbeatTaskContext(db: Db, input: HeartbeatTaskCo
       : (await workspacePreferenceService(db).get(issueContext.conversationUserId)).coordinatorWorkspaceEnabled
     : false;
   context.paperclipCoordinatorWorkspaceEnabled = Boolean(coordinatorWorkspace);
+  const chatProject = issueRef && isConversation(issueContext) && issueRef.projectId
+    ? await db.select({ id: projects.id, name: projects.name }).from(projects)
+        .where(eq(projects.id, issueRef.projectId)).then((rows) => rows[0] ?? null)
+    : null;
   const taskMarkdownInput = {
     coordinatorWorkspace: Boolean(coordinatorWorkspace),
     conversationConfirmations: issueRef && isConversation(issueContext)
@@ -231,6 +236,7 @@ export async function prepareHeartbeatTaskContext(db: Db, input: HeartbeatTaskCo
           workMode: issueRef.workMode,
           conversationAgentId: issueContext?.conversationAgentId,
           executionPolicy: issueContext?.executionPolicy,
+          project: chatProject,
           description: issueRef.description,
         }
       : null,

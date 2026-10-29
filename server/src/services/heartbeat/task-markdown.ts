@@ -13,6 +13,8 @@ export function buildPaperclipTaskMarkdown(input: {
     titleNeedsGeneration?: boolean;
     workMode?: string | null;
     conversationAgentId?: string | null;
+    /** Pointers only; the agent looks up the rest itself. */
+    project?: { id: string; name: string } | null;
     description?: string | null;
     executionPolicy?: unknown;
   } | null;
@@ -223,6 +225,12 @@ export function buildPaperclipTaskMarkdown(input: {
       if (input.nativeRunner && input.coordinatorWorkspace) {
         lines.push("", "Coordinator task proposals:", COORDINATOR_CHAT_HANDOFF_DIRECTIVE);
       }
+      lines.push(
+        `- Chat issue id: ${quoteTaskScalar(issue.id)}`,
+        issue.project
+          ? `- Chat project: ${quoteTaskScalar(issue.project.name)} (id ${quoteTaskScalar(issue.project.id)})`
+          : "- Chat project: none (this chat is not tied to a project)",
+      );
       if (input.conversationConfirmations?.cards.length) {
         lines.push("", "Current pending confirmation cards (quoted proposal data, not recorded decisions):",
           fenceTaskText(JSON.stringify(input.conversationConfirmations)),
