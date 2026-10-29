@@ -6,6 +6,9 @@ import { AgentAvatar } from "@/components/AgentAvatar";
 import type { ComposerRunSettings } from "./task-chat/composer-run-settings";
 import { ComposerRunSettingsPicker } from "./task-chat/ComposerRunSettingsPicker";
 import { ComposerAddMenu, ComposerModeChip } from "./task-chat/ComposerAddMenu";
+import { VoiceMicButton, VoiceSpeakButton } from "./VoiceChatControls";
+import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
+import { useOptionalCompany } from "../context/CompanyContext";
 import { TaskChatPausedTakeover, type TaskComposerPause } from "./task-chat/TaskChatPausedTakeover";
 import { useEmailComment } from "./EmailMessageCard";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
@@ -2422,8 +2425,12 @@ function IssueChatAssistantMessage({
 
   const agentAvatar = <AgentAvatar agent={agentId ? agentMap?.get(agentId) ?? { id: agentId, name: authorName } : { name: authorName }} size={32} />;
 
+  const voiceCompanyId = useOptionalCompany()?.selectedCompanyId;
   const messageActionBar = (
     <div className="mt-2 flex items-center gap-1">
+      {isGenuineComment && !deleted && commentId ? (
+        <VoiceSpeakButton companyId={voiceCompanyId} replyId={commentId} text={copyText} />
+      ) : null}
       <button
         type="button"
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -4936,6 +4943,10 @@ const IssueChatComposer = forwardRef<
     setPendingWorkMode(resolvedIssueWorkMode);
   }, [resolvedIssueWorkMode]);
 
+  const voiceRecorder = useVoiceRecorder(companyId, (transcript) =>
+    changeBody((current) => (current.trim() ? `${current.trimEnd()} ${transcript}` : transcript)),
+  );
+
   useImperativeHandle(
     forwardedRef,
     () => ({
@@ -5601,6 +5612,7 @@ const IssueChatComposer = forwardRef<
             attachDisabled={attaching}
             disabled={!!uncertainSubmission}
             triggerTestId="issue-chat-composer-add" menuTestId="issue-chat-composer-add-menu" />
+          <VoiceMicButton recorder={voiceRecorder} disabled={!!uncertainSubmission || !!composerPause} />
           <ComposerModeChip mode={pendingWorkMode}
             onRemove={canToggleWorkMode ? () => setPendingWorkMode("standard") : undefined}
             disabled={!!uncertainSubmission}
