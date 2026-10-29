@@ -211,6 +211,8 @@ export type IssueListFilters = {
   descendantOf?: string;
   createdFromIssueId?: string;
   includeAgentCreatedTasks?: boolean;
+  /** Also list chats, which are hidden from issue lists by default. */
+  includeChats?: boolean;
   includeParticipatedTasks?: boolean;
   includeRoutineExecutions?: boolean;
   includeBlockedBy?: boolean;
@@ -256,6 +258,7 @@ function issueListSearchParams(filters?: IssueListFilters) {
   if (filters?.descendantOf) params.set("descendantOf", filters.descendantOf);
   if (filters?.createdFromIssueId) params.set("createdFromIssueId", filters.createdFromIssueId);
   if (filters?.includeParticipatedTasks) params.set("includeParticipatedTasks", "true");
+  if (filters?.includeChats) params.set("chat", "include");
   if (filters?.includeAgentCreatedTasks !== undefined)
     params.set("includeAgentCreatedTasks", String(filters.includeAgentCreatedTasks));
   if (filters?.includeRoutineExecutions)

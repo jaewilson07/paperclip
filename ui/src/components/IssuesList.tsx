@@ -1,6 +1,6 @@
 import { useIssueRowDetails } from "../hooks/useIssueRowDetails";
 import { IssueRowDetailsNotice } from "./IssueRowDetailsNotice";
-import { useShowAgentCreatedTasks } from "../hooks/useShowAgentCreatedTasks";
+import { useShowAgentCreatedTasks, useShowChats } from "../hooks/useShowAgentCreatedTasks";
 import { useIssueHierarchyContext } from "../hooks/useIssueHierarchyContext";
 import { includeIssueHierarchyContext } from "../lib/issue-hierarchy-context";
 import { AgentIdentity } from "@/components/AgentIdentity";
@@ -840,6 +840,11 @@ function StreamlinedIssuesList({
     setViewState((previous) => previous.showAgentCreatedTasks === showAgentCreatedTasks
       ? previous : { ...previous, showAgentCreatedTasks });
   }, [enableAgentCreatedVisibilityFilter, showAgentCreatedTasks]);
+  const showChats = useShowChats(selectedCompanyId, viewStateKey);
+  useEffect(() => {
+    if (!enableAgentCreatedVisibilityFilter) return;
+    setViewState((previous) => previous.showChats === showChats ? previous : { ...previous, showChats });
+  }, [enableAgentCreatedVisibilityFilter, showChats]);
   const [assigneePickerIssueId, setAssigneePickerIssueId] = useState<string | null>(null);
   const [assigneeSearch, setAssigneeSearch] = useState("");
   const [issueSearch, setIssueSearch] = useState(initialSearch ?? "");
@@ -934,6 +939,7 @@ function StreamlinedIssuesList({
       creationRequestFilters,
       enableAgentCreatedVisibilityFilter && viewState.viewMode === "list" ? "index" : "compact",
       ISSUE_SEARCH_RESULT_LIMIT,
+        viewState.showChats,
     ],
     queryFn: ({ signal }) =>
       issuesApi.listCompact(selectedCompanyId!, {
@@ -943,6 +949,7 @@ function StreamlinedIssuesList({
         limit: ISSUE_SEARCH_RESULT_LIMIT,
         ...searchFilters,
         ...creationRequestFilters,
+        ...(viewState.showChats ? { includeChats: true } : {}),
       }, { signal }).then((rows) => rows as Issue[]),
     enabled: !!selectedCompanyId && normalizedIssueSearch.length > 0 && !searchWithinLoadedIssues,
     placeholderData: (previousData) => previousData,
@@ -959,6 +966,7 @@ function StreamlinedIssuesList({
         creationRequestFilters,
         "compact",
         ISSUE_BOARD_COLUMN_RESULT_LIMIT,
+        viewState.showChats,
       ],
       queryFn: ({ signal }: { signal: AbortSignal }) =>
         issuesApi.listCompact(selectedCompanyId!, {
@@ -968,6 +976,7 @@ function StreamlinedIssuesList({
           status,
           limit: ISSUE_BOARD_COLUMN_RESULT_LIMIT,
           ...creationRequestFilters,
+          ...(viewState.showChats ? { includeChats: true } : {}),
         }, { signal }).then((rows) => rows as Issue[]),
       enabled: !!selectedCompanyId && viewState.viewMode === "board" && !searchWithinLoadedIssues,
       placeholderData: (previousData: Issue[] | undefined) => previousData,

@@ -329,6 +329,7 @@ function boardRoutes(streamlinedUiEnabled: boolean, combinedInboxTasksEnabled: b
         </>
       )}
       <Route path="chats" element={<AgentChats />} />
+      <Route path="chats/c/:issueId" element={<AgentChatThread />} />
       <Route path="chats/:agentRef" element={<AgentChat />} />
       <Route path="issues/:issueId" element={<IssueDetail />} />
       {import.meta.env.DEV ? (

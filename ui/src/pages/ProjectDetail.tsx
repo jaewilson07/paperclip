@@ -1,4 +1,4 @@
-import { useShowAgentCreatedTasks } from "../hooks/useShowAgentCreatedTasks";
+import { useShowAgentCreatedTasks, useShowChats } from "../hooks/useShowAgentCreatedTasks";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { Link, useParams, useNavigate, useLocation, Navigate } from "@/lib/router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -35,6 +35,7 @@ import { projectRouteRef } from "../lib/utils";
 import { PROJECT_ICONS } from "../lib/project-icons";
 import { usePublishSharedQueryData, useSharedPollingQuery } from "../hooks/useSharedPolling";
 import { Button } from "@/components/ui/button";
+import { ProjectChatButton } from "@/components/ProjectChatsDialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -190,6 +191,7 @@ function ProjectTilePicker({
 
 function ProjectIssuesList({ projectId, companyId }: { projectId: string; companyId: string }) {
   const showAgentCreatedTasks = useShowAgentCreatedTasks(companyId, "paperclip:project-issues-view");
+  const showChats = useShowChats(companyId, "paperclip:project-issues-view");
   const queryClient = useQueryClient();
 
   const { data: agents } = useQuery({
@@ -222,8 +224,8 @@ function ProjectIssuesList({ projectId, companyId }: { projectId: string; compan
   });
 
   const { data: issues, isLoading, error } = useQuery({
-    queryKey: [...queryKeys.issues.listByProject(companyId, projectId), showAgentCreatedTasks],
-    queryFn: () => issuesApi.listAll(companyId, { projectId, includeRoutineExecutions: true, includeAgentCreatedTasks: showAgentCreatedTasks }),
+    queryKey: [...queryKeys.issues.listByProject(companyId, projectId), showAgentCreatedTasks, showChats],
+    queryFn: () => issuesApi.listAll(companyId, { projectId, includeRoutineExecutions: true, includeAgentCreatedTasks: showAgentCreatedTasks, includeChats: showChats }),
     enabled: !!companyId,
   });
   const liveIssueIds = useMemo(() => collectLiveIssueIds(liveRuns, issues), [issues, liveRuns]);
@@ -801,6 +803,7 @@ export function ProjectDetail() {
           ) : null}
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {resolvedCompanyId ? <ProjectChatButton companyId={resolvedCompanyId} projectId={project.id} projectName={project.name} /> : null}
           <StarToggle
             size="button"
             starred={projectStarred}
