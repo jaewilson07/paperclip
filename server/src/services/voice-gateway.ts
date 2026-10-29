@@ -4,8 +4,16 @@ export const VOICE_MAX_CLIP_BYTES = 10 * 1024 * 1024;
 export const VOICE_MAX_TTS_CHARS = 4000;
 const DEFAULT_GATEWAY_URL = "http://gateway:7630";
 const REQUEST_TIMEOUT_MS = 60_000;
+const HEALTH_TIMEOUT_MS = 3_000;
+
+export interface VoiceEngineHealth {
+  reachable: boolean;
+  voices: string[];
+}
 
 export interface SpeechEngine {
+  /** Cheap reachability probe; never rejects. */
+  health(): Promise<VoiceEngineHealth>;
   transcribe(clip: Buffer, contentType: string): Promise<string>;
   synthesize(text: string, voice: string): Promise<{ audio: Buffer; contentType: string }>;
 }
@@ -46,6 +54,17 @@ export function createGatewayEngine(baseUrl: string, fetchImpl: typeof fetch = f
     return res;
   }
   return {
+    async health() {
+      try {
+        const res = await fetchImpl(`${base}/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
+        if (!res.ok) return { reachable: false, voices: [] };
+        const body = (await res.json().catch(() => null)) as { voices?: unknown } | null;
+        const voices = Array.isArray(body?.voices) ? body.voices.filter((v): v is string => typeof v === "string") : [];
+        return { reachable: true, voices };
+      } catch {
+        return { reachable: false, voices: [] };
+      }
+    },
     async transcribe(clip, contentType) {
       const form = new FormData();
       form.append("file", new Blob([new Uint8Array(clip)], { type: contentType }), "clip.webm");
@@ -84,6 +103,12 @@ export function voiceService(engines: SpeechEngine[]) {
     throw last;
   }
   return {
+    /** Probes every engine; available when at least one answers. */
+    async status() {
+      const engines_ = await Promise.all(engines.map((e) => e.health()));
+      const voices = [...new Set(engines_.flatMap((h) => h.voices))];
+      return { available: engines_.some((h) => h.reachable), voices, engines: engines_.map((h) => ({ reachable: h.reachable })) };
+    },
     transcribe: (clip: Buffer, contentType: string) => firstOf((e) => e.transcribe(clip, contentType)),
     async synthesize(markdown: string, voice: string) {
       const text = stripMarkdownForSpeech(markdown).slice(0, VOICE_MAX_TTS_CHARS);
@@ -97,4 +122,14 @@ export function voiceService(engines: SpeechEngine[]) {
 export function voiceEnginesFromEnv(env: NodeJS.ProcessEnv = process.env): SpeechEngine[] {
   const urls = [env.PAPERCLIP_VOICE_GATEWAY_URL?.trim() || DEFAULT_GATEWAY_URL, env.PAPERCLIP_VOICE_FALLBACK_URL?.trim()];
   return urls.filter((u): u is string => Boolean(u)).map((u) => createGatewayEngine(u));
+}
+
+/** Logs engine reachability once at startup so a networking gap shows up before users hit it. */
+export async function logVoiceReachability(
+  engines: SpeechEngine[],
+  log: { info: (msg: string) => void; warn: (msg: string) => void },
+): Promise<void> {
+  const { available, engines: probed } = await voiceService(engines).status();
+  const summary = probed.map((e, i) => `#${i + 1}=${e.reachable ? "up" : "down"}`).join(" ");
+  (available ? log.info : log.warn)(`voice gateway reachability: ${summary || "no engines configured"}`);
 }

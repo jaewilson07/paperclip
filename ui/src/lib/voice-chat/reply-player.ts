@@ -1,4 +1,5 @@
 import { voiceApi } from "../../api/voice";
+import { getVoicePreference } from "./voice-preference";
 
 export type ReplyPlayerState = { replyId: string | null; phase: "idle" | "preparing" | "playing" };
 
@@ -37,7 +38,7 @@ export const replyPlayer = {
     abort = controller;
     set({ replyId, phase: "preparing" });
     try {
-      const blob = await voiceApi.speak(companyId, text, controller.signal);
+      const blob = await voiceApi.speak(companyId, text, getVoicePreference(), controller.signal);
       if (controller.signal.aborted) return;
       const el = new Audio(URL.createObjectURL(blob));
       audio = el;

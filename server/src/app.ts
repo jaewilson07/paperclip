@@ -131,6 +131,7 @@ import { sidebarBadgeRoutes } from "./routes/sidebar-badges.js";
 import { sidebarPreferenceRoutes } from "./routes/sidebar-preferences.js";
 import { announcementRoutes } from "./routes/announcements.js";
 import { voiceRoutes } from "./routes/voice.js";
+import { logVoiceReachability, voiceEnginesFromEnv } from "./services/voice-gateway.js";
 import { serverVersion } from "./version.js";
 import { primaryAgentRoutes } from "./routes/primary-agent.js";
 import { resourceMembershipRoutes } from "./routes/resource-memberships.js";
@@ -895,7 +896,9 @@ export async function createApp(
   api.use(sidebarBadgeRoutes(db));
   api.use(sidebarPreferenceRoutes(db));
   api.use(announcementRoutes(db, { ...opts.announcements, version: opts.hostVersion ?? serverVersion }));
-  api.use(voiceRoutes());
+  const voiceEngines = voiceEnginesFromEnv();
+  void logVoiceReachability(voiceEngines, logger);
+  api.use(voiceRoutes(voiceEngines));
   api.use(resourceMembershipRoutes(db));
   api.use(primaryAgentRoutes(db));
   api.use(inboxDismissalRoutes(db));

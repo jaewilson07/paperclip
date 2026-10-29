@@ -5612,7 +5612,7 @@ const IssueChatComposer = forwardRef<
             attachDisabled={attaching}
             disabled={!!uncertainSubmission}
             triggerTestId="issue-chat-composer-add" menuTestId="issue-chat-composer-add-menu" />
-          <VoiceMicButton recorder={voiceRecorder} disabled={!!uncertainSubmission || !!composerPause} />
+          <VoiceMicButton recorder={voiceRecorder} companyId={companyId} disabled={!!uncertainSubmission || !!composerPause} />
           <ComposerModeChip mode={pendingWorkMode}
             onRemove={canToggleWorkMode ? () => setPendingWorkMode("standard") : undefined}
             disabled={!!uncertainSubmission}

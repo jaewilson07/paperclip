@@ -13,6 +13,7 @@ function fakeGateway(name: string, opts: { down?: boolean } = {}, seen: Seen[] =
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (opts.down) throw new Error("ECONNREFUSED");
+    if (url.endsWith("/health")) return Response.json({ status: "ok", voices: ["jarvis", name] });
     seen.push({ url: `${name}${new URL(url).pathname}`, body: init?.body });
     if (url.endsWith("/v1/audio/transcriptions")) return Response.json({ text: ` hello from ${name} ` });
     return new Response(new Uint8Array([1, 2, 3]), { headers: { "Content-Type": "audio/mpeg" } });
@@ -80,5 +81,18 @@ describe("voice routes", () => {
     expect((await speak(app(engines, { type: "none" }), { text: "hi" })).status).toBe(401);
     expect((await transcribe(app(engines, { type: "none" }))).status).toBe(401);
     expect((await speak(app(engines), { text: "hi" }, otherCompanyId)).status).toBe(403);
+  });
+
+  it("reports engine reachability and voices on the status route", async () => {
+    const engines = [
+      createGatewayEngine("http://primary", fakeGateway("primary", { down: true })),
+      createGatewayEngine("http://fallback", fakeGateway("fallback")),
+    ];
+    const res = await request(app(engines)).get(`/api/companies/${companyId}/voice/status`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ available: true, voices: ["jarvis", "fallback"], engines: [{ reachable: false }, { reachable: true }] });
+    const none = await request(app([createGatewayEngine("http://primary", fakeGateway("primary", { down: true }))])).get(`/api/companies/${companyId}/voice/status`);
+    expect(none.body.available).toBe(false);
+    expect((await request(app(engines, { type: "none" })).get(`/api/companies/${companyId}/voice/status`)).status).toBe(401);
   });
 });

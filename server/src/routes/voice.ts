@@ -32,6 +32,11 @@ export function voiceRoutes(engines: SpeechEngine[] = voiceEnginesFromEnv()) {
     next();
   });
 
+  router.get("/companies/:companyId/voice/status", async (_req, res) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(await voice.status());
+  });
+
   router.post("/companies/:companyId/voice/transcribe", (req, res, next) => {
     rawAudio(req, res, (err) => {
       if (err && (err as { type?: string }).type === "entity.too.large") return next(payloadTooLarge("Recording is too large"));
