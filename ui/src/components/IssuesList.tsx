@@ -37,6 +37,7 @@ import {
   issueCreationRequestFilters,
   countActiveIssueFilters,
   defaultIssueFilterState,
+  defaultIssueListExcludeStatuses,
   issueFilterLabel,
   issuePriorityOrder,
   normalizeIssueFilterState,
@@ -180,6 +181,9 @@ export type IssueViewState = IssueFilterState & {
 
 const defaultViewState: IssueViewState = {
   ...defaultIssueFilterState,
+  // Closed issues bury live work, so every list starts without them. Stored
+  // state is untouched; only the no-stored-state default changes.
+  excludeStatuses: [...defaultIssueListExcludeStatuses],
   sortField: "updated",
   sortDir: "desc",
   groupBy: "none",
@@ -191,6 +195,11 @@ const defaultViewState: IssueViewState = {
   boardCardDensity: "auto",
   boardColdLaneMode: "expanded",
   boardColumnPageSize: KANBAN_COLUMN_DEFAULT_PAGE_SIZE,
+};
+
+const listBaselineFilterState: IssueFilterState = {
+  ...defaultIssueFilterState,
+  excludeStatuses: [...defaultIssueListExcludeStatuses],
 };
 
 function normalizeBoardCardDensity(value: unknown): BoardCardDensity {
@@ -213,6 +222,11 @@ function normalizeIssueViewState(value: unknown): IssueViewState {
     ...defaultViewState,
     ...parsed,
     ...normalizeIssueFilterState(parsed),
+    // Stored state that predates exclude mode keeps showing everything; only
+    // an empty/invalid payload falls back to the list default.
+    excludeStatuses: Object.keys(parsed).length > 0
+      ? normalizeIssueFilterState(parsed).excludeStatuses
+      : defaultViewState.excludeStatuses,
     // A saved workspace selection has no filter control. Drop it on load.
     // `initialWorkspaces` from the page address is applied after this.
     workspaces: [],
@@ -268,7 +282,7 @@ function getInitialWorkspaceViewState(
   // A status preset (Active / Backlog / Done, and All as the empty set) is the
   // view's definition, so it wins over whatever the last session persisted.
   // `undefined` means "no preset" and leaves the stored statuses alone.
-  return initialStatuses ? { ...scoped, statuses: initialStatuses } : scoped;
+  return initialStatuses ? { ...scoped, statuses: initialStatuses, excludeStatuses: [] } : scoped;
 }
 
 function getIssueColumnsStorageKey(key: string): string {
@@ -1967,6 +1981,7 @@ function StreamlinedIssuesList({
             enableRoutineTasksFilter={routineTasksOnly !== undefined}
             state={viewState}
             onChange={updateView}
+            baselineState={listBaselineFilterState}
             buttonVariant="outline"
             activeFilterCount={activeFilterCount}
             agents={agents}

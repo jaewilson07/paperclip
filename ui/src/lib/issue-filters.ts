@@ -14,6 +14,11 @@ export type IssueFilterWorkspaceContext = {
 
 export type IssueFilterState = {
   statuses: string[];
+  /**
+   * "Not in" companion to `statuses`: issues whose status is listed here are
+   * hidden. Applied on top of `statuses`, so a user can pick either mode.
+   */
+  excludeStatuses: string[];
   priorities: string[];
   assignees: string[];
   creators: string[];
@@ -42,6 +47,7 @@ export type IssueFilterState = {
 
 export const defaultIssueFilterState: IssueFilterState = {
   statuses: [],
+  excludeStatuses: [],
   priorities: [],
   assignees: [],
   creators: [],
@@ -83,11 +89,21 @@ export function externalObjectFilterLabel(value: string): string {
 export const issueStatusOrder = ["in_progress", "todo", "backlog", "in_review", "blocked", "done", "cancelled"];
 export const issuePriorityOrder = ["critical", "high", "medium", "low"];
 
-export const issueQuickFilterPresets = [
-  { label: "All", statuses: [] as string[] },
-  { label: "Active", statuses: ["todo", "in_progress", "in_review", "blocked"] },
-  { label: "Backlog", statuses: ["backlog"] },
-  { label: "Done", statuses: ["done", "cancelled"] },
+export const issueClosedStatuses = ["done", "cancelled"];
+
+/** What issue lists exclude when the user has no stored filter state. */
+export const defaultIssueListExcludeStatuses = issueClosedStatuses;
+
+export const issueQuickFilterPresets: Array<{
+  label: string;
+  statuses: string[];
+  excludeStatuses: string[];
+}> = [
+  { label: "All", statuses: [], excludeStatuses: [] },
+  { label: "Not closed", statuses: [], excludeStatuses: issueClosedStatuses },
+  { label: "Active", statuses: ["todo", "in_progress", "in_review", "blocked"], excludeStatuses: [] },
+  { label: "Backlog", statuses: ["backlog"], excludeStatuses: [] },
+  { label: "Done", statuses: issueClosedStatuses, excludeStatuses: [] },
 ];
 
 export function issueFilterLabel(value: string): string {
@@ -111,6 +127,8 @@ export function normalizeIssueFilterState(value: unknown): IssueFilterState {
   const candidate = value as Partial<Record<keyof IssueFilterState, unknown>>;
   return {
     statuses: normalizeIssueFilterValueArray(candidate.statuses),
+    // Stored state that predates exclude mode keeps meaning "no exclusion".
+    excludeStatuses: normalizeIssueFilterValueArray(candidate.excludeStatuses),
     priorities: normalizeIssueFilterValueArray(candidate.priorities),
     assignees: normalizeIssueFilterValueArray(candidate.assignees),
     creators: normalizeIssueFilterValueArray(candidate.creators),
@@ -245,6 +263,9 @@ export function applyIssueFilters(
     result = result.filter((issue) => !isAgentCreatedIssue(issue));
   }
   if (state.statuses.length > 0) result = result.filter((issue) => state.statuses.includes(issue.status));
+  if (state.excludeStatuses.length > 0) {
+    result = result.filter((issue) => !state.excludeStatuses.includes(issue.status));
+  }
   if (state.priorities.length > 0) result = result.filter((issue) => state.priorities.includes(issue.priority));
   if (state.assignees.length > 0) {
     result = result.filter((issue) => {
@@ -296,6 +317,11 @@ export function countActiveIssueFilters(
 ): number {
   let count = 0;
   if (state.statuses.length > 0) count += 1;
+  // The list default (hide closed) is a view baseline, not a user-chosen filter.
+  if (
+    state.excludeStatuses.length > 0
+    && !issueFilterArraysEqual(state.excludeStatuses, defaultIssueListExcludeStatuses)
+  ) count += 1;
   if (state.priorities.length > 0) count += 1;
   if (state.assignees.length > 0) count += 1;
   if (state.creators.length > 0) count += 1;

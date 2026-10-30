@@ -5,6 +5,7 @@ import type { ExternalObjectSummary, Issue } from "@paperclipai/shared";
 import {
   applyIssueFilters,
   countActiveIssueFilters,
+  defaultIssueListExcludeStatuses,
   defaultIssueFilterState,
   normalizeIssueFilterState,
   resolveIssueFilterWorkspaceId,
@@ -96,6 +97,23 @@ describe("issue filters", () => {
     expect(normalizeIssueFilterState({ hideRoutineExecutions: false, statuses: ["todo"] })).toMatchObject({ showAgentCreatedTasks: false, statuses: ["todo"] });
     expect(normalizeIssueFilterState({ showAgentCreatedTasks: "true" }).showAgentCreatedTasks).toBe(false);
     expect(normalizeIssueFilterState({ showAgentCreatedTasks: true }).showAgentCreatedTasks).toBe(true);
+  });
+
+  it("excludes statuses in not-in mode and composes with include", () => {
+    const issues = ["todo", "done", "cancelled", "blocked"].map((status) => makeIssue({ id: status, status: status as Issue["status"] }));
+    const ids = (state: Partial<typeof defaultIssueFilterState>) =>
+      applyIssueFilters(issues, { ...defaultIssueFilterState, ...state }).map((issue) => issue.id);
+    expect(ids({ excludeStatuses: ["done", "cancelled"] })).toEqual(["todo", "blocked"]);
+    expect(ids({ excludeStatuses: ["todo"] })).toEqual(["done", "cancelled", "blocked"]);
+    expect(ids({ statuses: ["todo", "done"], excludeStatuses: ["done"] })).toEqual(["todo"]);
+    expect(ids({})).toHaveLength(4);
+  });
+
+  it("keeps legacy stored state as show-everything and does not count the default exclude", () => {
+    expect(normalizeIssueFilterState({ statuses: ["todo"] }).excludeStatuses).toEqual([]);
+    expect(normalizeIssueFilterState({ excludeStatuses: ["done", 3] }).excludeStatuses).toEqual(["done"]);
+    expect(countActiveIssueFilters({ ...defaultIssueFilterState, excludeStatuses: [...defaultIssueListExcludeStatuses] })).toBe(0);
+    expect(countActiveIssueFilters({ ...defaultIssueFilterState, excludeStatuses: ["blocked"] })).toBe(1);
   });
 
   it("searches filter options case-insensitively without mutating the source", () => {
