@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   gate:
-    uses: paperclipai/paperclip/.github/workflows/ci-routing.yml@master
+    uses: ./.github/workflows/ci-routing.yml
 
   policy:
     needs: [gate]
