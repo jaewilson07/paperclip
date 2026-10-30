@@ -32,7 +32,7 @@ import { retryNativeWorkspaceExport } from "../services/native-runtime/native-wo
 import { reconstructNativeWorkspace, unreconciledNativeExportPredicate } from "../services/native-runtime/native-workspace-reconstruction.js";
 import { reconstructWorkspaceSchema } from "@paperclipai/shared";
 import { queuedInteractionId, readQueuedInteractionResponse, hasQueuedInteractionResponse } from "../services/queued-interaction-response.js";
-import { deliverConversationComments, isConversation } from "../services/agent-conversations.js";
+import { CHAT_DESCRIPTION_DOCUMENT_KEY, deliverConversationComments, isConversation } from "../services/agent-conversations.js";
 import { resolveChatTaskAssignment } from "../services/chat-task-assignment.js";
 import { issueRecoveryActionReadModel } from "../services/issue-recovery-actions.js";
 import { inspectWorkspaceSource } from "../services/workspace-source-inspection.js";
@@ -18547,7 +18547,9 @@ export function issueRoutes(
     const projectQuery = req.query.projectId as string | undefined;
     const conversations = await svc.listConversations(companyId, req.actor.userId,
       projectQuery === undefined ? {} : { projectId: projectQuery === "none" ? null : projectQuery });
-    res.json(await filterIssuesForActor(req, conversations));
+    const visible = await filterIssuesForActor(req, conversations);
+    const descriptions = await documentsSvc.getIssueDocumentBodiesByKey(visible.map((chat) => chat.id), CHAT_DESCRIPTION_DOCUMENT_KEY);
+    res.json(visible.map((chat) => ({ ...chat, chatDescription: descriptions.get(chat.id)?.trim() || null })));
   });
 
   // GET stays read-only. POST resumes the latest chat for (agent, user, project), or opens a new one

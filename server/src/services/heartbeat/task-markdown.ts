@@ -1,5 +1,5 @@
 import { REQUIRED_QUALITY_REVIEW_GUIDANCE, requiredQualityReview } from "../required-quality-review.js";
-import { AGENT_CHAT_DIRECTIVE, COORDINATOR_CHAT_HANDOFF_DIRECTIVE } from "../agent-conversations.js";
+import { AGENT_CHAT_DIRECTIVE, CHAT_DESCRIPTION_DOCUMENT_KEY, COORDINATOR_CHAT_HANDOFF_DIRECTIVE } from "../agent-conversations.js";
 import { publicChatTaskUrl } from "../chat-task-url.js";
 import { slackChatAgentGuidance } from "../connectors/slack/agent-guidance.js";
 import type { ConversationConfirmationContext } from "../conversation-confirmation-context.js";
@@ -230,6 +230,7 @@ export function buildPaperclipTaskMarkdown(input: {
         issue.project
           ? `- Chat project: ${quoteTaskScalar(issue.project.name)} (id ${quoteTaskScalar(issue.project.id)})`
           : "- Chat project: none (this chat is not tied to a project)",
+        `- Chat description: keep a 2 sentence summary of this chat in the issue document \`${CHAT_DESCRIPTION_DOCUMENT_KEY}\` (PUT /api/issues/{chat issue id}/documents/${CHAT_DESCRIPTION_DOCUMENT_KEY}). Write it on your first reply and rewrite it whenever your context is compacted or the topic shifts.`,
       );
       if (input.conversationConfirmations?.cards.length) {
         lines.push("", "Current pending confirmation cards (quoted proposal data, not recorded decisions):",

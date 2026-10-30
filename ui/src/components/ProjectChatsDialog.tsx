@@ -4,6 +4,7 @@ import { MessageCircle } from "lucide-react";
 import type { Agent } from "@paperclipai/shared";
 import { agentChatsApi } from "@/api/agentChats";
 import { agentsApi } from "@/api/agents";
+import { ChatHoverInfo } from "@/components/ChatHoverInfo";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useAgentChatEnabled } from "@/hooks/useAgentChatEnabled";
@@ -60,6 +61,10 @@ function ProjectChatsDialog({ companyId, projectId, projectName, onClose }: { co
   }
 
   const latest = chats.data?.[0];
+  function openChat(id: string) {
+    navigate(`/chats/c/${id}`);
+    onClose();
+  }
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogContent aria-describedby={undefined} className="gap-4 sm:max-w-md">
@@ -70,14 +75,21 @@ function ProjectChatsDialog({ companyId, projectId, projectName, onClose }: { co
           : <ul className="flex max-h-72 flex-col gap-1 overflow-y-auto">
             {chats.data.map((chat) => (
               <li key={chat.id}>
-                <button type="button" onClick={() => { navigate(`/chats/c/${chat.id}`); onClose(); }}
-                  className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <span className="truncate">{chat.title}{chat.id === latest?.id ? " · latest" : ""}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{agentName(chat.conversationAgentId)}</span>
-                </button>
+                <ChatHoverInfo agentName={agentName(chat.conversationAgentId)} description={chat.chatDescription ?? null}>
+                  <button type="button" onClick={() => openChat(chat.id)}
+                    className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <span className="truncate">{chat.title}{chat.id === latest?.id ? " · latest" : ""}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{agentName(chat.conversationAgentId)}</span>
+                  </button>
+                </ChatHoverInfo>
               </li>
             ))}
           </ul>}
+        {latest && (
+          <Button type="button" autoFocus onClick={() => openChat(latest.id)}>
+            Resume latest chat
+          </Button>
+        )}
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
           <label htmlFor="project-chat-agent" className="text-sm text-muted-foreground">New chat with</label>
           <select id="project-chat-agent" value={chosenId} onChange={(event) => setAgentId(event.target.value)}

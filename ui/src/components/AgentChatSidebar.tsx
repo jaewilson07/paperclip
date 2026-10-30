@@ -5,6 +5,7 @@ import { projectsApi } from "@/api/projects";
 import { useCompany } from "@/context/CompanyContext";
 import { groupChatsByProject, useChatSidebarMode, type ChatSidebarMode } from "@/lib/chat-sidebar-mode";
 import { queryKeys } from "@/lib/queryKeys";
+import { ChatHoverInfo } from "@/components/ChatHoverInfo";
 import { SidebarNavItem } from "@/components/SidebarNavItem";
 import { AgentIcon } from "@/components/AgentIconPicker";
 import { Button } from "@/components/ui/button";
@@ -129,9 +130,9 @@ function ChatsByProject({ agents }: { agents: Agent[] }) {
         <div key={key ?? "none"} className="flex flex-col gap-0.5">
           <span className="px-4 pt-2 font-mono text-(length:--text-nano) font-medium uppercase tracking-widest text-muted-foreground/60">{projectName(key)}</span>
           {groups.get(key)!.map((chat) => (
-            <div key={chat.id} title={`With ${agents.find((agent) => agent.id === chat.conversationAgentId)?.name ?? "agent"}`}>
+            <ChatHoverInfo key={chat.id} agentName={agents.find((agent) => agent.id === chat.conversationAgentId)?.name ?? "agent"} description={chat.chatDescription ?? null}>
               <SidebarNavItem to={`/chats/c/${chat.id}`} label={chat.title} />
-            </div>
+            </ChatHoverInfo>
           ))}
         </div>
       ))}

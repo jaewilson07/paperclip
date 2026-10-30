@@ -1,9 +1,12 @@
 import type { Issue } from "@paperclipai/shared";
 import { api } from "./client";
+/** A chat issue as listed: with its ~2 sentence description when the chat's agent has written one. */
+export type ChatIssue = Issue & { chatDescription?: string | null };
+
 export const agentChatsApi = {
   /** `projectId`: a project's chats; "none": chats with no project; omitted: all of the user's chats. */
   list: (companyId: string, opts: { projectId?: string | "none" } = {}) =>
-    api.get<Issue[]>(`/companies/${companyId}/chats${opts.projectId ? `?projectId=${encodeURIComponent(opts.projectId)}` : ""}`),
+    api.get<ChatIssue[]>(`/companies/${companyId}/chats${opts.projectId ? `?projectId=${encodeURIComponent(opts.projectId)}` : ""}`),
   get: (companyId: string, agentRef: string) =>
     api.get<Issue | null>(
       `/companies/${companyId}/chats/${encodeURIComponent(agentRef)}`,

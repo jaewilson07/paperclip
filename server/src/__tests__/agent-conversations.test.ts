@@ -212,6 +212,16 @@ const support = await getEmbeddedPostgresTestSupport();
       expect(switched.body.conversationAgentId).toBe(other.id);
       expect(switched.body.assigneeAgentId).toBe(other.id);
       expect(switched.body.projectId).toBe(project.id);
+      expect(switched.body.conversationSessionGeneration).toBe(first.conversationSessionGeneration + 1);
+
+      await documentService(db).upsertIssueDocument({
+        issueId: first.id, key: "chat-description", format: "markdown",
+        body: "Planning the Alpha launch. Waiting on the budget decision.", createdByUserId: owner,
+      });
+      const described = await request(app).get(`/api/companies/${companyId}/chats?projectId=${project.id}`);
+      const byId = new Map(described.body.map((chat: { id: string; chatDescription: string | null }) => [chat.id, chat.chatDescription]));
+      expect(byId.get(first.id)).toBe("Planning the Alpha launch. Waiting on the budget decision.");
+      expect(byId.get(second.id)).toBeNull();
       expect((await request(app).post(`/api/issues/${loose.id}/chat-agent`).send({ agentId: "no-such-agent" })).status).toBe(404);
     });
     it("resolves through authenticated company routes, keeps opens read-only, and derives ownership", async () => {

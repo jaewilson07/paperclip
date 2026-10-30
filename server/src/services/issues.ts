@@ -10082,6 +10082,8 @@ export function issueService(db: Db) {
     /** Move a chat to another agent; history stays and later messages go to the new agent. */
     switchConversationAgent: async (companyId: string, issueId: string, agentId: string) => db.update(issues).set({
       conversationAgentId: agentId, assigneeAgentId: agentId, updatedAt: new Date(),
+      // A new generation stops the previous agent's session or in-flight turn from resuming against the new agent.
+      conversationSessionGeneration: sql`${issues.conversationSessionGeneration} + 1`,
     }).where(and(
       eq(issues.companyId, companyId), eq(issues.id, issueId), isNotNull(issues.conversationAgentId),
     )).returning().then((rows) => rows[0] ?? null),
