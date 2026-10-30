@@ -46,7 +46,7 @@ async function assertConstraints(sql: postgres.Sql, row: Awaited<ReturnType<type
     await expect(sql`UPDATE issues SET ${sql(update)} WHERE id = ${row.issueId}`)
       .rejects.toMatchObject({ code: "23514", constraint_name: "issues_conversation_identity_check" });
   }
-  // 0347 relaxed the unique identity index: one (agent, user) pair may own several chats.
+  // 0419 relaxed the unique identity index: one (agent, user) pair may own several chats.
   await sql`INSERT INTO issues (company_id, title, assignee_agent_id, status, conversation_agent_id, conversation_user_id, conversation_state)
     VALUES (${row.companyId}, 'Second conversation', ${row.agentId}, 'in_review', ${row.agentId}, ${row.userId}, 'waiting')`;
   await expect(sql`INSERT INTO issue_comments (company_id, issue_id, author_user_id, body, client_request_id)
