@@ -48,6 +48,7 @@ export function IssueFilterPanel({ state, onChange, activeFilterCount, agents = 
           {enableLiveRunsFilter ? <FilterRow label="Live runs only" checked={state.liveOnly === true} onToggle={() => onChange({ liveOnly: !state.liveOnly })} /> : null}
           {enableAgentCreatedVisibilityFilter ? <FilterRow label="Show agent-created tasks" checked={state.showAgentCreatedTasks} onToggle={() => onChange({ showAgentCreatedTasks: !state.showAgentCreatedTasks })} /> : null}
           {enableRoutineTasksFilter ? <FilterRow label="Routine tasks" checked={state.routineTasksOnly === true} onToggle={() => onChange({ routineTasksOnly: !state.routineTasksOnly })} /> : null}
+          {enableAgentCreatedVisibilityFilter ? <FilterRow label="Chat" checked={state.showChats} onToggle={() => onChange({ showChats: !state.showChats })} /> : null}
         </FilterGroup> : null}
       </div>
       <FilterGroup title="Project" optionsKey="projects" searchLabel="projects" query={queries.projects} onQueryChange={search("projects")}>

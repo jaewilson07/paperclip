@@ -62,6 +62,7 @@ const loadIssueDetail = () =>
   (issueDetailLoad ??= import("./pages/IssueDetail").then((module) => ({ default: module.IssueDetail })));
 const IssueDetail = lazy(loadIssueDetail);
 const AgentChat = lazy(() => import("./pages/AgentChat").then((module) => ({ default: module.AgentChat })));
+const AgentChatThread = lazy(() => import("./pages/AgentChatThread").then((module) => ({ default: module.AgentChatThread })));
 const IssueChatLongThreadPerf = lazy(() => import("./pages/IssueChatLongThreadPerf").then((module) => ({ default: module.IssueChatLongThreadPerf })));
 const loadInbox = () => import("./pages/Inbox").then((module) => ({ default: module.Inbox }));
 const Inbox = lazy(loadInbox);
@@ -329,6 +330,7 @@ function boardRoutes(streamlinedUiEnabled: boolean, combinedInboxTasksEnabled: b
         </>
       )}
       <Route path="chats" element={<AgentChats />} />
+      <Route path="chats/c/:issueId" element={<AgentChatThread />} />
       <Route path="chats/:agentRef" element={<AgentChat />} />
       <Route path="issues/:issueId" element={<IssueDetail />} />
       {import.meta.env.DEV ? (

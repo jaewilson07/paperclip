@@ -535,9 +535,10 @@ export function AgentDetail() {
     enabled: !!resolvedCompanyId && !!agent?.id && shouldLoadHeartbeats,
   });
 
+  const [showChats, setShowChats] = useState(false);
   const { data: allIssues } = useQuery({
-    queryKey: [...queryKeys.issues.list(resolvedCompanyId!), "participant-agent", resolvedAgentId ?? "__none__"],
-    queryFn: () => issuesApi.list(resolvedCompanyId!, { participantAgentId: resolvedAgentId! }),
+    queryKey: [...queryKeys.issues.list(resolvedCompanyId!), "participant-agent", resolvedAgentId ?? "__none__", showChats],
+    queryFn: () => issuesApi.list(resolvedCompanyId!, { participantAgentId: resolvedAgentId!, ...(showChats ? { includeChats: true } : {}) }),
     enabled: !!resolvedCompanyId && !!resolvedAgentId && needsOverviewData,
   });
 
@@ -1085,6 +1086,8 @@ export function AgentDetail() {
           agent={agent}
           runs={heartbeats ?? []}
           assignedIssues={assignedIssues}
+          showChats={showChats}
+          onShowChatsChange={setShowChats}
           runtimeState={runtimeState}
           reportsToAgent={reportsToAgent}
           directReportCount={directReports.length}
@@ -1427,11 +1430,16 @@ export function AgentOverview({
   runs,
   assignedIssues,
   directReports = [],
+  showChats = false,
+  onShowChatsChange,
   skillNames,
 }: {
   agent: AgentDetailRecord;
   runs: HeartbeatRun[];
   assignedIssues: Issue[];
+  /** Chats are hidden from task lists by default; this surfaces them in Recent Tasks. */
+  showChats?: boolean;
+  onShowChatsChange?: (show: boolean) => void;
   runtimeState?: AgentRuntimeState;
   reportsToAgent?: Agent;
   directReportCount: number;
@@ -1527,9 +1535,17 @@ export function AgentOverview({
         <AgentSectionHeading
           title="Recent tasks"
           action={
-            <Link to={`/issues?participantAgentId=${agent.id}`} className="text-xs text-muted-foreground no-underline transition-colors hover:text-foreground">
-              See all tasks
-            </Link>
+            <span className="flex items-center gap-3">
+              {onShowChatsChange && (
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={showChats} onChange={(event) => onShowChatsChange(event.target.checked)} />
+                  Chat
+                </label>
+              )}
+              <Link to={`/issues?participantAgentId=${agent.id}`} className="text-xs text-muted-foreground no-underline transition-colors hover:text-foreground">
+                See all tasks
+              </Link>
+            </span>
           }
         />
         {assignedIssues.length === 0 ? (

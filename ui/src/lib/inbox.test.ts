@@ -795,6 +795,7 @@ describe("inbox helpers", () => {
           externalObjectStatuses: [],
           showAgentCreatedTasks: false,
         routineTasksOnly: false,
+        showChats: false,
         },
       }).map((issue) => issue.id),
     ).toEqual(["remote-match"]);
@@ -817,6 +818,7 @@ describe("inbox helpers", () => {
           externalObjectStatuses: [],
           showAgentCreatedTasks: false,
         routineTasksOnly: false,
+        showChats: false,
         },
       }),
     ).toEqual([]);
@@ -839,6 +841,7 @@ describe("inbox helpers", () => {
           externalObjectStatuses: [],
           showAgentCreatedTasks: false,
         routineTasksOnly: false,
+        showChats: false,
         },
       }),
     ).toEqual([]);
@@ -888,6 +891,7 @@ describe("inbox helpers", () => {
           externalObjectStatuses: ["failed"],
           showAgentCreatedTasks: false,
         routineTasksOnly: false,
+        showChats: false,
         },
         issueFilterContext: {
           externalObjectSummaryByIssueId: summaries,
@@ -985,6 +989,7 @@ describe("inbox helpers", () => {
         externalObjectStatuses: [],
         showAgentCreatedTasks: true,
         routineTasksOnly: false,
+        showChats: false,
       },
     });
     saveInboxFilterPreferences("company-2", {
@@ -1002,6 +1007,7 @@ describe("inbox helpers", () => {
         externalObjectStatuses: [],
         showAgentCreatedTasks: false,
         routineTasksOnly: false,
+        showChats: false,
       },
     });
 
@@ -1020,6 +1026,7 @@ describe("inbox helpers", () => {
         externalObjectStatuses: [],
         showAgentCreatedTasks: true,
         routineTasksOnly: false,
+        showChats: false,
       },
     });
     expect(loadInboxFilterPreferences("company-2")).toEqual({
@@ -1037,6 +1044,7 @@ describe("inbox helpers", () => {
         externalObjectStatuses: [],
         showAgentCreatedTasks: false,
         routineTasksOnly: false,
+        showChats: false,
       },
     });
   });
@@ -1073,6 +1081,7 @@ describe("inbox helpers", () => {
         externalObjectStatuses: [],
         showAgentCreatedTasks: false,
         routineTasksOnly: false,
+        showChats: false,
       },
     });
   });

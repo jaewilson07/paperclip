@@ -3,6 +3,15 @@ import { taskCollectionPreferencesStorageKey, TASK_COLLECTION_PREFERENCES_CHANGE
 
 /** Subscribe the collection's fetching owner to its persisted filter control. */
 export function useShowAgentCreatedTasks(companyId: string | null, collectionKey: string): boolean {
+  return useViewStateFlag(companyId, collectionKey, "showAgentCreatedTasks");
+}
+
+/** Same subscription for the Chat filter: whether the list should also fetch chats. */
+export function useShowChats(companyId: string | null, collectionKey: string): boolean {
+  return useViewStateFlag(companyId, collectionKey, "showChats");
+}
+
+function useViewStateFlag(companyId: string | null, collectionKey: string, field: "showAgentCreatedTasks" | "showChats"): boolean {
   const getSnapshot = useCallback(() => {
     try {
       const key = taskCollectionPreferencesStorageKey({ companyId: companyId ?? "__unscoped__", collectionKey });
@@ -12,7 +21,7 @@ export function useShowAgentCreatedTasks(companyId: string | null, collectionKey
       const valid = envelope?.version === TASK_COLLECTION_PREFERENCES_VERSION
         && envelope.companyId === (companyId ?? "__unscoped__") && envelope.collectionKey === collectionKey;
       const view = valid ? envelope.viewState : legacy ? JSON.parse(legacy) : null;
-      return view?.showAgentCreatedTasks === true;
+      return view?.[field] === true;
     } catch {
       return false;
     }

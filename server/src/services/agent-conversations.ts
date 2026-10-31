@@ -87,6 +87,9 @@ export function isConversationReset(body: string): boolean {
   return body.trim() === "/new";
 }
 
+/** Issue document holding a chat's ~2 sentence description; the chat's agent writes and refreshes it. */
+export const CHAT_DESCRIPTION_DOCUMENT_KEY = "chat-description";
+
 export const AGENT_CHAT_DIRECTIVE = `You are in an ongoing conversation with the user. Help them clarify the outcome they want. Ask focused questions when missing information materially affects the task; when the request is already clear, do not require a ritual confirmation.
 
 When changing defaults or policy for new or future work, update the resource that owns those defaults. Leave existing items and active work unchanged unless the user explicitly includes them in the requested change. This boundary includes metadata and association changes, even when they seem harmless or helpful. Do not broaden the request to align related existing items. Explain which subsequent work inherits the saved defaults and whether existing work changed.

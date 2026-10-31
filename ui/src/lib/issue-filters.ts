@@ -38,6 +38,8 @@ export type IssueFilterState = {
   externalObjectStatuses: string[];
   showAgentCreatedTasks: boolean;
   routineTasksOnly?: boolean;
+  /** Chats are issues hidden from lists by default; this surfaces them. */
+  showChats: boolean;
 };
 
 export const defaultIssueFilterState: IssueFilterState = {
@@ -52,6 +54,7 @@ export const defaultIssueFilterState: IssueFilterState = {
   externalObjectStatuses: [],
   showAgentCreatedTasks: false,
   routineTasksOnly: false,
+  showChats: false,
 };
 
 export const externalObjectFilterOrder = [
@@ -121,6 +124,7 @@ export function normalizeIssueFilterState(value: unknown): IssueFilterState {
     externalObjectStatuses: normalizeIssueFilterValueArray(candidate.externalObjectStatuses),
     showAgentCreatedTasks: candidate.showAgentCreatedTasks === true,
     routineTasksOnly: candidate.routineTasksOnly === true,
+    showChats: candidate.showChats === true,
   };
 }
 
@@ -306,5 +310,6 @@ export function countActiveIssueFilters(
   if (state.routineTasksOnly) count += 1;
   if (state.externalObjectStatuses.length > 0) count += 1;
   if (enableAgentCreatedVisibilityFilter && state.showAgentCreatedTasks) count += 1;
+  if (enableAgentCreatedVisibilityFilter && state.showChats) count += 1;
   return count;
 }

@@ -166,3 +166,20 @@ describe("heartbeat task markdown rendering", () => {
     expect(markdown).not.toContain("old-approved-revision");
   });
 });
+
+describe("chat wake prompt project pointers", () => {
+  const chat = { ...issue, conversationAgentId: "agent-1" };
+
+  it("includes the chat issue id and project id and name", () => {
+    const markdown = buildPaperclipTaskMarkdown({
+      issue: { ...chat, project: { id: "proj-1", name: "Alpha" } },
+    })!;
+    expect(markdown).toContain('Chat issue id: "task-1"');
+    expect(markdown).toContain('Chat project: "Alpha" (id "proj-1")');
+  });
+
+  it("says so when the chat has no project", () => {
+    const markdown = buildPaperclipTaskMarkdown({ issue: chat })!;
+    expect(markdown).toContain("Chat project: none");
+  });
+});
