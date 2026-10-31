@@ -58,7 +58,7 @@ describe("IssueFiltersPopover", () => {
     act(() => root.render(<IssueFiltersPopover enableAgentCreatedVisibilityFilter enableRoutineTasksFilter presentation={presentation} state={{ ...defaultIssueFilterState, routineTasksOnly: true }} onChange={onChange} activeFilterCount={1} />));
     const visibility = container.querySelector('[data-filter-options="visibility"]');
     expect(Array.from(visibility?.querySelectorAll("label") ?? []).map(label => label.textContent)).toEqual([
-      "Live runs only", "Show agent-created tasks", "Routine tasks",
+      "Live runs only", "Show agent-created tasks", "Routine tasks", "Chat",
     ]);
     expect(container.textContent).toContain("Visibility");
     expect(container.textContent).not.toContain("Source");

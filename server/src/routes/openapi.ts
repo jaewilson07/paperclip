@@ -4206,6 +4206,19 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: "post",
+  path: "/api/issues/{id}/chat-agent",
+  tags: ["issues"],
+  summary: "Switch the agent a chat is attached to",
+  description: "Requires Agent Chat to be enabled and the caller to own the conversation. History is kept; later messages go to the new agent.",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: jsonBody(z.object({ agentId: z.string() })),
+  },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden, 404: r.notFound, 422: r.unprocessable },
+});
+
+registry.registerPath({
   method: "get",
   path: "/api/companies/{companyId}/issues",
   tags: ["issues"],
