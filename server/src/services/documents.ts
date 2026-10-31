@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { documentRevisions, documents, issueDocuments, issues } from "@paperclipai/db";
 import { isSystemIssueDocumentKey, issueDocumentKeySchema } from "@paperclipai/shared";
@@ -156,6 +156,18 @@ export function documentService(db: Db) {
         .where(eq(issueDocuments.issueId, issueId))
         .orderBy(asc(issueDocuments.key), desc(documents.updatedAt));
       return filterSystemDocuments(rows, options.includeSystem ?? false).map((row) => mapIssueDocumentRow(row, true));
+    },
+
+    /** Latest body of one document key across many issues, as issueId -> body. Issues without it are absent. */
+    getIssueDocumentBodiesByKey: async (issueIds: string[], rawKey: string) => {
+      if (issueIds.length === 0) return new Map<string, string>();
+      const key = normalizeDocumentKey(rawKey);
+      const rows = await db
+        .select({ issueId: issueDocuments.issueId, body: documents.latestBody })
+        .from(issueDocuments)
+        .innerJoin(documents, eq(issueDocuments.documentId, documents.id))
+        .where(and(inArray(issueDocuments.issueId, issueIds), eq(issueDocuments.key, key)));
+      return new Map(rows.map((row) => [row.issueId, row.body]));
     },
 
     getIssueDocumentByKey: async (issueId: string, rawKey: string) => {

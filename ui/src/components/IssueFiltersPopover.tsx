@@ -545,6 +545,15 @@ export function IssueFiltersPopover({
                   />
                   <span className="text-sm">Routine tasks</span>
                 </label> : null}
+                {enableAgentCreatedVisibilityFilter ? (
+                  <label className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 hover:bg-accent/50">
+                    <Checkbox
+                      checked={state.showChats}
+                      onCheckedChange={(checked) => onChange({ showChats: checked === true })}
+                    />
+                    <span className="text-sm">Chat</span>
+                  </label>
+                ) : null}
               </div> : null}
             </div>
           </div>

@@ -1886,6 +1886,8 @@ export function parseStatusFilter(
 
 export interface IssueFilters {
   attention?: "blocked";
+  /** Chats are issues hidden from lists by default: "include" shows them with work, "only" shows just chats. */
+  chat?: "include" | "only";
   status?: string | readonly string[];
   /**
    * Filter by assignee agent ID.
@@ -2038,6 +2040,8 @@ type IssueCreateInput = Omit<typeof issues.$inferInsert, "companyId" | "title" |
   workspaceSelectionSource?: "explicit" | "channel";
   workspaceSelectionActor?: AuthorizationActor;
   title?: string;
+  /** Open an additional chat instead of resuming the latest one for the same (agent, user, project). */
+  newConversation?: boolean;
   initialPlan?: string | null;
   /** Internal, server-derived provenance for an accepted in-app chat suggestion. */
   conversationHandoff?: { conversationId: string; sessionGeneration: number };
@@ -8178,8 +8182,9 @@ export function issueService(db: Db) {
         if (filters.parentIds.length === 0) return [];
         conditions.push(inArray(issues.parentId, filters.parentIds));
       }
+      if (filters?.chat === "only") conditions.push(isNotNull(issues.conversationAgentId));
       if (!filters?.q?.trim() && !filters?.issueIds) {
-        conditions.push(isNull(issues.conversationAgentId));
+        if (!filters?.chat) conditions.push(isNull(issues.conversationAgentId));
         if (!filters?.touchedByUserId && !filters?.unreadForUserId && !filters?.inboxArchivedByUserId) {
           conditions.push(nonIdleSlackIssueCondition());
         }
@@ -8527,8 +8532,9 @@ export function issueService(db: Db) {
       if (filters?.readCondition) conditions.push(filters.readCondition);
       const creationCondition = creationVisibilityCondition(companyId, filters);
       if (creationCondition) conditions.push(creationCondition);
+      if (filters?.chat === "only") conditions.push(isNotNull(issues.conversationAgentId));
       if (!filters?.q?.trim()) {
-        conditions.push(isNull(issues.conversationAgentId));
+        if (!filters?.chat) conditions.push(isNull(issues.conversationAgentId));
         if (!filters?.touchedByUserId && !filters?.unreadForUserId && !filters?.inboxArchivedByUserId) {
           conditions.push(nonIdleSlackIssueCondition());
         }
@@ -10061,13 +10067,26 @@ export function issueService(db: Db) {
       });
     },
 
-    listConversations: async (companyId: string, userId: string) => db.select().from(issues).where(and(
+    /** `projectId`: a project's chats; `null`: chats with no project; omitted: all chats. Most recent first. */
+    listConversations: async (companyId: string, userId: string, opts: { projectId?: string | null } = {}) => db.select().from(issues).where(and(
       eq(issues.companyId, companyId), eq(issues.conversationUserId, userId), isNotNull(issues.conversationAgentId),
+      opts.projectId === undefined ? undefined : opts.projectId === null ? isNull(issues.projectId) : eq(issues.projectId, opts.projectId),
     )).orderBy(desc(issues.updatedAt), asc(issues.id)),
 
-    getConversation: async (companyId: string, agentId: string, userId: string) => db.select().from(issues).where(and(
+    /** Most recently active chat for the (agent, user, project) triple; several may exist. */
+    getConversation: async (companyId: string, agentId: string, userId: string, projectId: string | null = null) => db.select().from(issues).where(and(
       eq(issues.companyId, companyId), eq(issues.conversationAgentId, agentId), eq(issues.conversationUserId, userId),
-    )).then((rows) => rows[0] ?? null),
+      projectId === null ? isNull(issues.projectId) : eq(issues.projectId, projectId),
+    )).orderBy(desc(issues.updatedAt), asc(issues.id)).limit(1).then((rows) => rows[0] ?? null),
+
+    /** Move a chat to another agent; history stays and later messages go to the new agent. */
+    switchConversationAgent: async (companyId: string, issueId: string, agentId: string) => db.update(issues).set({
+      conversationAgentId: agentId, assigneeAgentId: agentId, updatedAt: new Date(),
+      // A new generation stops the previous agent's session or in-flight turn from resuming against the new agent.
+      conversationSessionGeneration: sql`${issues.conversationSessionGeneration} + 1`,
+    }).where(and(
+      eq(issues.companyId, companyId), eq(issues.id, issueId), isNotNull(issues.conversationAgentId),
+    )).returning().then((rows) => rows[0] ?? null),
 
     create: async (
       companyId: string,
@@ -10076,6 +10095,7 @@ export function issueService(db: Db) {
     ) => {
       const {
         workspaceSelection, workspaceSelectionSource = "explicit", workspaceSelectionActor,
+        newConversation,
         initialPlan,
         conversationHandoff,
         labelIds: inputLabelIds,
@@ -10132,11 +10152,13 @@ export function issueService(db: Db) {
       const persist = async (tx: DbTransaction) => {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`issue-privacy-tree:${companyId}`}, 0))`);
         await assertExecutionTaskParent(tx as unknown as Db, companyId, issueData.parentId);
-        if (issueData.conversationAgentId && issueData.conversationUserId) {
-          const identity = `conversation:${companyId}:${issueData.conversationAgentId}:${issueData.conversationUserId}`;
+        if (issueData.conversationAgentId && issueData.conversationUserId && !newConversation) {
+          const identity = `conversation:${companyId}:${issueData.conversationAgentId}:${issueData.conversationUserId}:${issueData.projectId ?? "none"}`;
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity}, 0))`);
           const [existing] = await tx.select().from(issues).where(and(eq(issues.companyId, companyId),
-            eq(issues.conversationAgentId, issueData.conversationAgentId), eq(issues.conversationUserId, issueData.conversationUserId)));
+            eq(issues.conversationAgentId, issueData.conversationAgentId), eq(issues.conversationUserId, issueData.conversationUserId),
+            issueData.projectId ? eq(issues.projectId, issueData.projectId) : isNull(issues.projectId)))
+            .orderBy(desc(issues.updatedAt), asc(issues.id)).limit(1);
           if (existing) {
             const [enriched] = await withIssueLabels(tx, [existing]);
             const [withRelations] = await withIssueRelationSummaries(companyId, [enriched], tx);

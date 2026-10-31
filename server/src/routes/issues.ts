@@ -32,7 +32,7 @@ import { retryNativeWorkspaceExport } from "../services/native-runtime/native-wo
 import { reconstructNativeWorkspace, unreconciledNativeExportPredicate } from "../services/native-runtime/native-workspace-reconstruction.js";
 import { reconstructWorkspaceSchema } from "@paperclipai/shared";
 import { queuedInteractionId, readQueuedInteractionResponse, hasQueuedInteractionResponse } from "../services/queued-interaction-response.js";
-import { deliverConversationComments, isConversation } from "../services/agent-conversations.js";
+import { CHAT_DESCRIPTION_DOCUMENT_KEY, deliverConversationComments, isConversation } from "../services/agent-conversations.js";
 import { resolveChatTaskAssignment } from "../services/chat-task-assignment.js";
 import { issueRecoveryActionReadModel } from "../services/issue-recovery-actions.js";
 import { inspectWorkspaceSource } from "../services/workspace-source-inspection.js";
@@ -8621,6 +8621,7 @@ export function issueRoutes(
       touchedByUserId,
       inboxArchivedByUserId,
       unreadForUserId,
+      chat: req.query.chat === "include" || req.query.chat === "only" ? req.query.chat : undefined,
       projectId: uuidFilters.projectId,
       workspaceId: uuidFilters.workspaceId,
       executionWorkspaceId: uuidFilters.executionWorkspaceId,
@@ -18543,11 +18544,16 @@ export function issueRoutes(
     assertCompanyAccess(req, companyId);
     if (req.actor.type !== "board" || !req.actor.userId) throw forbidden("Board user access required");
     if (!(await instanceSettings.getExperimental()).enableAgentChat) throw notFound("Agent Chat is disabled");
-    const conversations = await svc.listConversations(companyId, req.actor.userId);
-    res.json(await filterIssuesForActor(req, conversations));
+    const projectQuery = req.query.projectId as string | undefined;
+    const conversations = await svc.listConversations(companyId, req.actor.userId,
+      projectQuery === undefined ? {} : { projectId: projectQuery === "none" ? null : projectQuery });
+    const visible = await filterIssuesForActor(req, conversations);
+    const descriptions = await documentsSvc.getIssueDocumentBodiesByKey(visible.map((chat) => chat.id), CHAT_DESCRIPTION_DOCUMENT_KEY);
+    res.json(visible.map((chat) => ({ ...chat, chatDescription: descriptions.get(chat.id)?.trim() || null })));
   });
 
-  // GET stays read-only. POST resolves the single chat on explicit add or first send/upload.
+  // GET stays read-only. POST resumes the latest chat for (agent, user, project), or opens a new one
+  // on first send or when body.new is true. body.projectId ties a new chat to a project.
   for (const method of ["get", "post"] as const) {
     router[method]("/companies/:companyId/chats/:agentRef", async (req, res) => {
       const companyId = req.params.companyId as string;
@@ -18558,20 +18564,40 @@ export function issueRoutes(
       if (resolved.ambiguous) throw conflict("Agent reference is ambiguous");
       if (!resolved.agent) throw notFound("Agent not found");
       const agent = resolved.agent;
-      const existing = await svc.getConversation(companyId, agent.id, req.actor.userId);
+      const projectId = ((method === "get" ? req.query.projectId : req.body?.projectId) as string | undefined) || null;
+      const wantsNew = method === "post" && req.body?.new === true;
+      const existing = wantsNew ? null : await svc.getConversation(companyId, agent.id, req.actor.userId, projectId);
       if (existing && !(await assertIssueReadAllowed(req, res, existing))) return;
       if (existing || method === "get") { res.json(existing); return; }
       const issue = await svc.create(companyId, {
-        title: `Chat with ${agent.name}`, assigneeAgentId: agent.id,
+        title: `Chat with ${agent.name}`, assigneeAgentId: agent.id, ...(projectId ? { projectId } : {}), newConversation: wantsNew,
         conversationAgentId: agent.id, conversationUserId: req.actor.userId,
         conversationState: "waiting", status: "in_review", createdByUserId: req.actor.userId,
       });
       await logActivity(db, { companyId, actorType: "user", actorId: req.actor.userId,
         action: "issue.conversation_opened", entityType: "issue", entityId: issue.id,
-        details: { agentId: agent.id } });
+        details: { agentId: agent.id, projectId } });
       res.json(issue);
     });
   }
+
+  router.post("/issues/:id/chat-agent", async (req, res) => {
+    if (req.actor.type !== "board" || !req.actor.userId) throw forbidden("Board user access required");
+    if (!(await instanceSettings.getExperimental()).enableAgentChat) throw notFound("Agent Chat is disabled");
+    const issue = await getAccessibleResource(req, res, svc.getById(req.params.id as string), "Issue not found");
+    if (!issue) return;
+    if (!issue.conversationAgentId) throw unprocessable("Issue is not a chat");
+    if (req.actor.userId !== issue.conversationUserId) throw forbidden("Only the conversation owner can switch the chat agent");
+    const resolved = await agentsSvc.resolveByReference(issue.companyId, String(req.body?.agentId ?? ""));
+    if (resolved.ambiguous) throw conflict("Agent reference is ambiguous");
+    if (!resolved.agent) throw notFound("Agent not found");
+    const updated = await svc.switchConversationAgent(issue.companyId, issue.id, resolved.agent.id);
+    if (!updated) throw notFound("Chat not found");
+    await logActivity(db, { companyId: issue.companyId, actorType: "user", actorId: req.actor.userId,
+      action: "issue.conversation_agent_switched", entityType: "issue", entityId: issue.id,
+      details: { fromAgentId: issue.conversationAgentId, toAgentId: resolved.agent.id } });
+    res.json(updated);
+  });
 
   router.post(
     "/issues/:id/comments",

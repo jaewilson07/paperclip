@@ -85,6 +85,9 @@ export function isConversationReset(body: string): boolean {
   return body.trim() === "/new";
 }
 
+/** Issue document holding a chat's ~2 sentence description; the chat's agent writes and refreshes it. */
+export const CHAT_DESCRIPTION_DOCUMENT_KEY = "chat-description";
+
 export const AGENT_CHAT_DIRECTIVE = `You are in an ongoing conversation with the user. Help them clarify the outcome they want. Ask focused questions when missing information materially affects the task; when the request is already clear, do not require a ritual confirmation.
 
 Research, clarify, and develop full plans here using the conversation's plan document. Revise the draft as the discussion develops. Planning alone does not create execution tasks. Put implementation and substantial execution into separate tasks.

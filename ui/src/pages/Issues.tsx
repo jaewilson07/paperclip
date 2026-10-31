@@ -1,4 +1,4 @@
-import { useShowAgentCreatedTasks } from "../hooks/useShowAgentCreatedTasks";
+import { useShowAgentCreatedTasks, useShowChats } from "../hooks/useShowAgentCreatedTasks";
 import { useCoordinatorWorkspaceEnabled } from "../hooks/useCoordinatorWorkspaceEnabled";
 import { CoordinatorTasks } from "./CoordinatorTasks";
 import { useDesignSandbox } from "../context/DesignSandboxContext";
@@ -211,6 +211,7 @@ function OrganizationIssues({
       return next;
     }, { replace: true });
   }, [setSearchParams, syncedSearch]);
+  const showChats = useShowChats(selectedCompanyId, "paperclip:issues-view");
   const participantAgentId = searchParams.get("participantAgentId") ?? undefined;
   const initialWorkspaces = searchParams.getAll("workspace").filter((workspaceId) => workspaceId.length > 0);
   const workspaceIdFilter = initialWorkspaces.length === 1 ? initialWorkspaces[0] : undefined;
@@ -288,6 +289,7 @@ function OrganizationIssues({
       "with-routine-executions",
       includeAgentCreatedTasks,
       originKind,
+      showChats,
       "infinite",
       issuePageSize,
     ],
@@ -298,6 +300,7 @@ function OrganizationIssues({
       includeRoutineExecutions: true,
       includeAgentCreatedTasks,
       originKind,
+      includeChats: showChats,
       limit: issuePageSize,
       offset: pageParam,
       sortField: "updated",
