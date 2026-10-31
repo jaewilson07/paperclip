@@ -64,6 +64,7 @@ import { Identity } from "../components/Identity";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { QueryErrorState, queryViewKind, useQueryView } from "../components/QueryView";
 import { AgentActionButtons } from "../components/AgentActionButtons";
+import { AgentChatButton } from "../components/AgentChatButton";
 import { InlineBanner } from "../components/InlineBanner";
 import { BuiltInBundlePanel } from "../components/BuiltInBundlePanel";
 import { ConfigureBuiltInAgentModal } from "../components/ConfigureBuiltInAgentModal";
@@ -1328,6 +1329,7 @@ export function AgentDetail() {
                 : undefined
             }
           >
+            <AgentChatButton agent={currentAgent} />
             {mobileLiveRun && (
               <Link
                 to={`/agents/${canonicalAgentRef}/runs/${mobileLiveRun.id}`}
