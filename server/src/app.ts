@@ -138,6 +138,8 @@ import { userProfileRoutes } from "./routes/user-profiles.js";
 import { sidebarBadgeRoutes } from "./routes/sidebar-badges.js";
 import { sidebarPreferenceRoutes } from "./routes/sidebar-preferences.js";
 import { announcementRoutes } from "./routes/announcements.js";
+import { voiceRoutes } from "./routes/voice.js";
+import { logVoiceReachability, voiceEnginesFromEnv } from "./services/voice-gateway.js";
 import { serverVersion } from "./version.js";
 import { workspacePreferenceRoutes } from "./routes/workspace-preferences.js";
 import { primaryAgentRoutes } from "./routes/primary-agent.js";
@@ -814,6 +816,10 @@ export async function createApp(
   api.use(sidebarBadgeRoutes(db));
   api.use(sidebarPreferenceRoutes(db));
   api.use(announcementRoutes(db, { ...opts.announcements, version: opts.hostVersion ?? serverVersion }));
+  const voiceEngines = voiceEnginesFromEnv();
+  // Startup probe only: a failure must never become an unhandled rejection that kills the server.
+  void logVoiceReachability(voiceEngines, logger).catch((err) => logger.warn({ err }, "voice gateway reachability probe failed"));
+  api.use(voiceRoutes(voiceEngines));
   api.use(resourceMembershipRoutes(db));
   api.use(primaryAgentRoutes(db));
   api.use(workspacePreferenceRoutes(db));

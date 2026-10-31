@@ -4207,6 +4207,37 @@ registry.registerPath({
 
 registry.registerPath({
   method: "get",
+  path: "/api/companies/{companyId}/voice/status",
+  tags: ["voice"],
+  summary: "Report whether a speech engine is reachable",
+  request: { params: z.object({ companyId: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/companies/{companyId}/voice/transcribe",
+  tags: ["voice"],
+  summary: "Transcribe a recorded audio clip to text",
+  description: "Raw audio request body. Falls back to the secondary engine when the primary is down.",
+  request: { params: z.object({ companyId: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden, 413: r.payloadTooLarge, 503: { description: "Voice unavailable" } },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/companies/{companyId}/voice/speak",
+  tags: ["voice"],
+  summary: "Synthesize speech audio from text",
+  request: {
+    params: z.object({ companyId: z.string() }),
+    body: jsonBody(z.object({ text: z.string(), voice: z.string().optional() })),
+  },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden, 422: r.unprocessable, 503: { description: "Voice unavailable" } },
+});
+
+registry.registerPath({
+  method: "get",
   path: "/api/companies/{companyId}/issues",
   tags: ["issues"],
   summary: "List issues in a company",
