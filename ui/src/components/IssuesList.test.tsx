@@ -406,6 +406,55 @@ describe("IssuesList", () => {
     queryClient.clear();
   });
 
+  it("hides done and cancelled by default, and All shows them in one click", async () => {
+    const { root } = renderWithQueryClient(
+      <IssuesList
+        issues={[
+          createIssue({ id: "open", title: "Open task", status: "todo" }),
+          createIssue({ id: "closed", title: "Closed task", status: "done" }),
+          createIssue({ id: "dropped", title: "Dropped task", status: "cancelled" }),
+        ]}
+        isLoading={false}
+        agents={[]}
+        projects={[]}
+        viewStateKey="paperclip:test-issues"
+        onUpdateIssue={() => undefined}
+      />,
+      container,
+    );
+
+    await waitForAssertion(() => {
+      expect(container.textContent).toContain("Open task");
+      expect(container.textContent).not.toContain("Closed task");
+      expect(container.textContent).not.toContain("Dropped task");
+    });
+
+    await act(async () => {
+      const filterButton = Array.from(document.body.querySelectorAll("button")).find(
+        (button) => button.getAttribute("title") === "Filter",
+      );
+      filterButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    let allPreset: HTMLButtonElement | undefined;
+    await waitForAssertion(() => {
+      allPreset = Array.from(document.body.querySelectorAll("button")).find((el) => el.textContent === "All");
+      expect(allPreset).toBeDefined();
+    });
+    await act(async () => {
+      allPreset!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    await waitForAssertion(() => {
+      expect(container.textContent).toContain("Closed task");
+      expect(container.textContent).toContain("Dropped task");
+    });
+
+    act(() => root.unmount());
+  });
+
   it("uses the master list and legacy persistence when Streamlined UI is off", async () => {
     mockInstanceSettingsApi.getExperimental.mockResolvedValue({
       enableIsolatedWorkspaces: false,
@@ -919,6 +968,8 @@ describe("IssuesList", () => {
   });
 
   it("adds checklist affordances for workflow-sorted sub-issue lists", async () => {
+    // Pre-exclude-mode stored state keeps showing closed issues.
+    localStorage.setItem("paperclip:test-issues:company-1", JSON.stringify({ sortField: "workflow", sortDir: "asc" }));
     const issueDone = createIssue({
       id: "issue-done",
       identifier: "PAP-1",
@@ -1074,6 +1125,8 @@ describe("IssuesList", () => {
   });
 
   it("collapses multiple workflow blocker chips to the first blocker and a count", async () => {
+    // Pre-exclude-mode stored state keeps showing closed issues.
+    localStorage.setItem("paperclip:test-issues:company-1", JSON.stringify({ sortField: "workflow", sortDir: "asc" }));
     const issueDone = createIssue({
       id: "issue-done",
       identifier: "PAP-1",
@@ -1168,6 +1221,8 @@ describe("IssuesList", () => {
   });
 
   it("uses hierarchical checklist step numbers when nested rows render inline", async () => {
+    // Pre-exclude-mode stored state keeps showing closed issues.
+    localStorage.setItem("paperclip:test-issues:company-1", JSON.stringify({ sortField: "workflow", sortDir: "asc" }));
     const firstRoot = createIssue({
       id: "issue-first-root",
       identifier: "PAP-1",
