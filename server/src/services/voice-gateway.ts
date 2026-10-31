@@ -131,5 +131,8 @@ export async function logVoiceReachability(
 ): Promise<void> {
   const { available, engines: probed } = await voiceService(engines).status();
   const summary = probed.map((e, i) => `#${i + 1}=${e.reachable ? "up" : "down"}`).join(" ");
-  (available ? log.info : log.warn)(`voice gateway reachability: ${summary || "no engines configured"}`);
+  const line = `voice gateway reachability: ${summary || "no engines configured"}`;
+  // Call on the logger: a detached pino method loses `this` and throws.
+  if (available) log.info(line);
+  else log.warn(line);
 }

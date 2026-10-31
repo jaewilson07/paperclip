@@ -817,7 +817,8 @@ export async function createApp(
   api.use(sidebarPreferenceRoutes(db));
   api.use(announcementRoutes(db, { ...opts.announcements, version: opts.hostVersion ?? serverVersion }));
   const voiceEngines = voiceEnginesFromEnv();
-  void logVoiceReachability(voiceEngines, logger);
+  // Startup probe only: a failure must never become an unhandled rejection that kills the server.
+  void logVoiceReachability(voiceEngines, logger).catch((err) => logger.warn({ err }, "voice gateway reachability probe failed"));
   api.use(voiceRoutes(voiceEngines));
   api.use(resourceMembershipRoutes(db));
   api.use(primaryAgentRoutes(db));
