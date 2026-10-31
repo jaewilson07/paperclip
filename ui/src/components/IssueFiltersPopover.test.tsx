@@ -122,6 +122,30 @@ describe("IssueFiltersPopover", () => {
     expect(creationToggle?.querySelector("input")?.checked).toBe(false);
   });
 
+  it("offers Not closed / All presets and an Is not status mode", () => {
+    const root = createRoot(container);
+    const onChange = vi.fn();
+    const notClosed = { ...defaultIssueFilterState, excludeStatuses: ["done", "cancelled"] };
+
+    act(() => {
+      root.render(
+        <IssueFiltersPopover presentation="streamlined" state={notClosed} onChange={onChange} activeFilterCount={0} />,
+      );
+    });
+
+    const button = (label: string) =>
+      Array.from(container.querySelectorAll("button")).find((el) => el.textContent === label) as HTMLButtonElement;
+    expect(button("Not closed").className).toContain("bg-primary");
+    expect(button("All").className).not.toContain("bg-primary");
+    expect(button("Is not").getAttribute("aria-pressed")).toBe("true");
+
+    act(() => button("All").click());
+    expect(onChange).toHaveBeenLastCalledWith({ statuses: [], excludeStatuses: [] });
+
+    act(() => button("Is").click());
+    expect(onChange).toHaveBeenLastCalledWith({ statuses: ["done", "cancelled"], excludeStatuses: [] });
+  });
+
   it("searches long option lists while the popover remains the only scroll owner", () => {
     const root = createRoot(container);
     const agents = Array.from({ length: 7 }, (_, index) => ({

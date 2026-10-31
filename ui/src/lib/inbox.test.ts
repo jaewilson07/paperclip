@@ -785,6 +785,7 @@ describe("inbox helpers", () => {
         remoteIssues: [remoteMatch],
         issueFilters: {
           statuses: ["in_progress"],
+          excludeStatuses: [],
           priorities: [],
           assignees: [],
           creators: [],
@@ -808,6 +809,7 @@ describe("inbox helpers", () => {
         remoteIssues: [remoteMatch],
         issueFilters: {
           statuses: [],
+          excludeStatuses: [],
           priorities: [],
           assignees: [],
           creators: [],
@@ -831,6 +833,7 @@ describe("inbox helpers", () => {
         remoteIssues: [remoteMatch],
         issueFilters: {
           statuses: [],
+          excludeStatuses: [],
           priorities: [],
           assignees: [],
           creators: [],
@@ -881,6 +884,7 @@ describe("inbox helpers", () => {
         remoteIssues: [failedMatch, freshMatch],
         issueFilters: {
           statuses: [],
+          excludeStatuses: [],
           priorities: [],
           assignees: [],
           creators: [],
@@ -979,6 +983,7 @@ describe("inbox helpers", () => {
       allApprovalFilter: "resolved",
       issueFilters: {
         statuses: ["todo"],
+        excludeStatuses: [],
         priorities: ["high"],
         assignees: ["agent-1"],
         creators: ["user:user-1"],
@@ -997,6 +1002,7 @@ describe("inbox helpers", () => {
       allApprovalFilter: "actionable",
       issueFilters: {
         statuses: ["done"],
+        excludeStatuses: [],
         priorities: [],
         assignees: [],
         creators: [],
@@ -1016,6 +1022,7 @@ describe("inbox helpers", () => {
       allApprovalFilter: "resolved",
       issueFilters: {
         statuses: ["todo"],
+        excludeStatuses: [],
         priorities: ["high"],
         assignees: ["agent-1"],
         creators: ["user:user-1"],
@@ -1034,6 +1041,7 @@ describe("inbox helpers", () => {
       allApprovalFilter: "actionable",
       issueFilters: {
         statuses: ["done"],
+        excludeStatuses: [],
         priorities: [],
         assignees: [],
         creators: [],
@@ -1055,6 +1063,7 @@ describe("inbox helpers", () => {
       allApprovalFilter: "bogus",
       issueFilters: {
         statuses: ["todo", 123],
+        excludeStatuses: [],
         priorities: "high",
         assignees: ["agent-1"],
         creators: ["user:user-1", 42],
@@ -1071,6 +1080,7 @@ describe("inbox helpers", () => {
       allApprovalFilter: "all",
       issueFilters: {
         statuses: ["todo"],
+        excludeStatuses: [],
         priorities: [],
         assignees: ["agent-1"],
         creators: ["user:user-1"],

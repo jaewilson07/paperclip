@@ -118,7 +118,10 @@ export function IssueFiltersPopover({
   creators,
   presentation = "legacy",
   inboxScopeFilters,
+  baselineState = defaultIssueFilterState,
 }: {
+  /** What "Clear" resets to; lists pass their not-closed default. */
+  baselineState?: IssueFilterState;
   state: IssueFilterState;
   onChange: (patch: Partial<IssueFilterState>) => void;
   activeFilterCount: number;
@@ -142,6 +145,22 @@ export function IssueFiltersPopover({
   const [assigneeSearch, setAssigneeSearch] = useState("");
   const [projectSearch, setProjectSearch] = useState("");
   const [labelSearch, setLabelSearch] = useState("");
+  const [statusModeChoice, setStatusModeChoice] = useState<"include" | "exclude">("include");
+  const statusMode = state.excludeStatuses.length > 0
+    ? "exclude"
+    : state.statuses.length > 0
+      ? "include"
+      : statusModeChoice;
+  const selectedStatuses = statusMode === "exclude" ? state.excludeStatuses : state.statuses;
+  const setSelectedStatuses = (next: string[]) =>
+    onChange(statusMode === "exclude" ? { statuses: [], excludeStatuses: next } : { statuses: next, excludeStatuses: [] });
+  const switchStatusMode = (next: "include" | "exclude") => {
+    setStatusModeChoice(next);
+    if (next === statusMode) return;
+    onChange(next === "exclude"
+      ? { statuses: [], excludeStatuses: state.statuses }
+      : { statuses: state.excludeStatuses, excludeStatuses: [] });
+  };
   const visibleAgents = useMemo(
     () => searchIssueFilterOptions(agents, assigneeSearch, (option) => option.name),
     [agents, assigneeSearch],
@@ -184,7 +203,7 @@ export function IssueFiltersPopover({
     [creatorOptionById, currentUserId, state.creators],
   );
   const clearFilters = () => {
-    onChange(defaultIssueFilterState);
+    onChange(baselineState);
     inboxScopeFilters?.onClear();
   };
 
@@ -294,7 +313,8 @@ export function IssueFiltersPopover({
             <span className="text-xs text-muted-foreground">Quick filters</span>
             <div className="flex flex-wrap gap-1.5">
               {issueQuickFilterPresets.map((preset) => {
-                const isActive = issueFilterArraysEqual(state.statuses, preset.statuses);
+                const isActive = issueFilterArraysEqual(state.statuses, preset.statuses)
+                  && issueFilterArraysEqual(state.excludeStatuses, preset.excludeStatuses);
                 return (
                   <button
                     key={preset.label}
@@ -304,7 +324,9 @@ export function IssueFiltersPopover({
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
                     }`}
-                    onClick={() => onChange({ statuses: isActive ? [] : [...preset.statuses] })}
+                    onClick={() => onChange(isActive
+                      ? { statuses: [], excludeStatuses: [] }
+                      : { statuses: [...preset.statuses], excludeStatuses: [...preset.excludeStatuses] })}
                   >
                     {preset.label}
                   </button>
@@ -318,13 +340,32 @@ export function IssueFiltersPopover({
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div className="min-w-0 space-y-3">
               <div className="space-y-1">
-                <span className="text-xs text-muted-foreground">Status</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Status</span>
+                  <div className="flex gap-1" role="group" aria-label="Status filter mode">
+                    {(["include", "exclude"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={statusMode === mode}
+                        className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${
+                          statusMode === mode
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                        onClick={() => switchStatusMode(mode)}
+                      >
+                        {mode === "include" ? "Is" : "Is not"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="space-y-0.5">
                   {issueStatusOrder.map((status) => (
                     <label key={status} className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 hover:bg-accent/50">
                       <Checkbox
-                        checked={state.statuses.includes(status)}
-                        onCheckedChange={() => onChange({ statuses: toggleIssueFilterValue(state.statuses, status) })}
+                        checked={selectedStatuses.includes(status)}
+                        onCheckedChange={() => setSelectedStatuses(toggleIssueFilterValue(selectedStatuses, status))}
                       />
                       <StatusIcon status={status} />
                       <span className="text-sm">{issueFilterLabel(status)}</span>

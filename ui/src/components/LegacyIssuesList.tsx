@@ -40,6 +40,7 @@ import {
   issueCreationRequestFilters,
   countActiveIssueFilters,
   defaultIssueFilterState,
+  defaultIssueListExcludeStatuses,
   issueFilterLabel,
   issuePriorityOrder,
   normalizeIssueFilterState,
@@ -174,6 +175,9 @@ export type IssueViewState = IssueFilterState & {
 
 const defaultViewState: IssueViewState = {
   ...defaultIssueFilterState,
+  // Closed issues bury live work, so every list starts without them. Stored
+  // state is untouched; only the no-stored-state default changes.
+  excludeStatuses: [...defaultIssueListExcludeStatuses],
   sortField: "updated",
   sortDir: "desc",
   groupBy: "none",
@@ -184,6 +188,11 @@ const defaultViewState: IssueViewState = {
   boardCardDensity: "auto",
   boardColdLaneMode: "expanded",
   boardColumnPageSize: KANBAN_COLUMN_DEFAULT_PAGE_SIZE,
+};
+
+const listBaselineFilterState: IssueFilterState = {
+  ...defaultIssueFilterState,
+  excludeStatuses: [...defaultIssueListExcludeStatuses],
 };
 
 function normalizeBoardCardDensity(value: unknown): BoardCardDensity {
@@ -209,6 +218,7 @@ function getViewState(key: string): IssueViewState {
         ...defaultViewState,
         ...parsed,
         ...normalizeIssueFilterState(parsed),
+        // Stored state that predates exclude mode keeps showing everything.
         workspaces: [],
         sortField: ISSUE_SORT_FIELDS.includes(parsed.sortField) ? parsed.sortField : defaultViewState.sortField,
         sortDir: parsed.sortDir === "asc" ? "asc" : "desc",
@@ -1849,6 +1859,7 @@ export function IssuesList({
             presentation="legacy"
             state={viewState}
             onChange={updateView}
+            baselineState={listBaselineFilterState}
             buttonVariant="outline"
             activeFilterCount={activeFilterCount}
             agents={agents}
