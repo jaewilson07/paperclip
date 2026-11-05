@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageCircle } from "lucide-react";
+import { List, MessageCircle } from "lucide-react";
 import type { Agent } from "@paperclipai/shared";
 import { agentChatsApi } from "@/api/agentChats";
 import { agentsApi } from "@/api/agents";
@@ -13,16 +13,44 @@ import { queryKeys } from "@/lib/queryKeys";
 
 const DEFAULT_CHAT_AGENT = "projectmanager";
 
-/** Chat button for a project header: lists the project's chats (latest first) and starts new ones. */
+/**
+ * Chat button for a project header. Click resumes the project's latest chat; with no chats yet it opens the
+ * dialog to start one. "All chats" always opens the dialog (list + new chat).
+ */
 export function ProjectChatButton({ companyId, projectId, projectName }: { companyId: string; projectId: string; projectName: string }) {
   const { enabled } = useAgentChatEnabled();
+  const client = useQueryClient();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [resuming, setResuming] = useState(false);
   if (!enabled) return null;
+
+  async function resumeLatest() {
+    if (resuming) return;
+    setResuming(true);
+    try {
+      const chats = await client.fetchQuery({
+        queryKey: [...queryKeys.agentChats.list(companyId), "project", projectId],
+        queryFn: () => agentChatsApi.list(companyId, { projectId }),
+        staleTime: 0,
+      });
+      if (chats[0]) navigate(`/chats/c/${chats[0].id}`);
+      else setOpen(true);
+    } catch {
+      setOpen(true);
+    } finally {
+      setResuming(false);
+    }
+  }
+
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <Button type="button" variant="outline" size="sm" disabled={resuming} onClick={() => { void resumeLatest(); }}>
         <MessageCircle aria-hidden="true" className="size-4" />
         Chat
+      </Button>
+      <Button type="button" variant="ghost" size="sm" aria-label="All chats" title="All chats" onClick={() => setOpen(true)}>
+        <List aria-hidden="true" className="size-4" />
       </Button>
       {open && <ProjectChatsDialog companyId={companyId} projectId={projectId} projectName={projectName} onClose={() => setOpen(false)} />}
     </>
