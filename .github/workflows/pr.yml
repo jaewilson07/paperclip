@@ -17,3 +17,18 @@ jobs:
     # Master requires CODEOWNERS review for .github/**, including this workflow.
     # The AWS runner group permits pr-trusted.yml@refs/heads/master.
     uses: paperclipai/paperclip/.github/workflows/pr-trusted.yml@master
+
+  # Single required-check rollup for safe_merge (see DAT-1608 ci-ok precedent).
+  # `ci` is the reusable workflow that runs verify and e2e, so its result
+  # aggregates both. Skipped (label-only events) is not a failure.
+  ci-ok:
+    if: always()
+    needs: [ci]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job failed or was cancelled
+        run: |
+          echo "ci: ${{ needs.ci.result }}"
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            exit 1
+          fi
