@@ -59,19 +59,10 @@ their execution, and uncertain prior executions must be reconciled before waking
 ### Plugin task panels
 
 An installed plugin can offer an agent detail tab in the task side panel through
-its optional `taskSidePanel` declaration. The launcher offers that view for the
-running agent, or the task's assigned agent when idle. Manual selection mounts
-the same authorized viewer used on the agent page and needs no activity event.
-The view remains selectable after the run ends.
-
-A declared activation pair controls automatic opening. The runtime captures
-Runner context before use and records `runtime.activity.recorded` after success.
-Core maps that namespace/activity key to the declaration and restores it from
-the run log on reload or reconnect. After matching activity, readiness gets
-three bounded attempts with no periodic availability poll. A ready view opens
-the pane and selects its tab once per run, respecting dismissal during that run.
-Declarations without a mapping support manual selection. Plugins own viewer
-content, readiness, and authorization. Missing or disabled plugins add no view.
+its optional `taskSidePanel` declaration. Open the view from the task side-panel
+launcher for the running agent, or the assigned agent when idle. The plugin owns
+its label, viewer, and access checks. Missing or disabled plugins add no view.
+A closed panel can be reopened from the launcher.
 
 Implementation: [panel discovery](../../ui/src/hooks/useTaskPluginPanels.ts) and
 [task panel](../../ui/src/components/task-side-panel/TaskSidePanel.tsx).

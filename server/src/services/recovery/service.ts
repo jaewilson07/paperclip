@@ -1,3 +1,5 @@
+import { notifyScheduledRetryDispatch } from "../run-dispatch-notifications.js";
+import { isContextCompactionRun } from "../context-compaction.js";
 import { notifyNativeEnvironmentSettlement } from "../native-environment-settlement-notifications.js";
 import { notifyExternalAgentSettlement } from "../../modules/external-agents/index.js";
 import { notifyNativeStatusReassessment } from "../native-status-reassessment-notifications.js";
@@ -6,6 +8,11 @@ import { notifyCancelledWorkspacePreservation } from "../cancelled-workspace-pre
 import { notifyInstructionCollection } from "../instruction-collection-notifications.js";
 import { notifyChatRunMilestones } from "../chat-run-milestone-notifications.js";
 import { boundRunIssueId } from "../run-task-binding.js";
+import { REMOTE_WORKSPACE_PREPARATION_TIMEOUT_CODE, REMOTE_WORKSPACE_RESTORE_FAILED_CODE } from "../remote-workspace-transport.js";
+import { REUSABLE_SANDBOX_RESUME_FAILED_CODE } from "../reusable-sandbox-resume-error.js";
+import { PLUGIN_WORKER_UNAVAILABLE_CODE } from "../plugin-worker-unavailable-error.js";
+import { ENVIRONMENT_PROVIDER_UNAVAILABLE_CODE } from "../environment-provider-unavailable-error.js";
+import { RUNNER_REVISION_MISMATCH_CODE } from "../runner-revision-mismatch.js";
 import { recoveryRunContextColumn, recoveryRunVersionColumn } from "./run-context-read.js";
 import { recoveryRunResultColumn } from "./run-result-read.js";
 import { readLegacyDispositionSource } from "./legacy-disposition-read.js";
@@ -26,7 +33,7 @@ import {
   decideLegacyContinuation, legacyDispositionEpisode, legacyDispositionFingerprint,
   LEGACY_DISPOSITION_REPAIR_INSTRUCTION, type LegacyDispositionEpisode,
 } from "./legacy-continuation.js";
-import { CONTROLLER_LEASE_LOST_FAILURE_CODE, hasLiveLegacyController } from "../legacy-controller-lease.js";
+import { CONTROLLER_LEASE_LOST_FAILURE_CODE, hasLiveLegacyController, liveLegacyControllerExpiresAt } from "../legacy-controller-lease.js";
 import { isCompletedOnboardingHandoffWake } from "../chat-completion-delivery.js";
 import { instanceSettingsService } from "../instance-settings.js";
 import { isWaitingConversation, settleConversationTurnForRun, deliverConversationComments } from "../agent-conversations.js";
@@ -90,6 +97,7 @@ import { parseObject, asBoolean, asNumber } from "../../adapters/utils.js";
 import { runningProcesses } from "../../adapters/index.js";
 import {
   isNativeRunnerOwnershipHeld,
+  nativeManualAdmissionHoldsExecution,
   nativeRunnerOwnershipNotHeldCondition,
 } from "../native-runtime/native-runner-ownership.js";
 import { visibleIssueCondition } from "../issue-visibility.js";
@@ -111,6 +119,8 @@ import { emitAgentTaskRun } from "../agent-task-run-telemetry.js";
 import { budgetService } from "../budgets.js";
 import { unadmittedChatWakeupCondition } from "../durable-chat-wakeup.js";
 import { issueRecoveryActionService } from "../issue-recovery-actions.js";
+import { PROVIDER_LIMIT_DEFAULT_COOLDOWN_MS } from "../system-recovery-state.js";
+import { parseProviderQuotaClockReset } from "../provider-quota-reset.js";
 import { hasUnverifiedNativeWorkspaceFinalizationOwner } from "../native-runtime/native-workspace-finalization-recovery-state.js";
 import {
   legacyExecutionNeedsReconciliationWithEvidence,
@@ -167,6 +177,7 @@ import { withRecoveryContext } from "./status-only-context.js";
 import { isAutomaticRecoverySuppressedByPauseHold } from "./pause-hold-guard.js";
 import {
   collectDispositionRepairSourceState,
+  readDispositionRepairDurableWaitingState,
   dispositionRepairIssueFields,
   dispositionRepairDelayMs,
   DISPOSITION_REPAIR_MAX_ATTEMPTS,
@@ -244,6 +255,7 @@ type ResolvedDependencyWakeBackstopOptions = {
   runId?: string | null;
   companyId?: string | null;
   blockerIssueId?: string | null;
+  issueId?: string;
   source?: ResolvedDependencyWakeBackstopSource;
 };
 
@@ -548,6 +560,12 @@ const NON_RETRYABLE_CONTINUATION_ERROR_CODES = new Set<string>([
   "workspace_git_scan_cancelled",
   "workspace_git_scan_output_limit",
   "workspace_git_scan_failed",
+  REMOTE_WORKSPACE_PREPARATION_TIMEOUT_CODE,
+  REUSABLE_SANDBOX_RESUME_FAILED_CODE,
+  REMOTE_WORKSPACE_RESTORE_FAILED_CODE,
+  PLUGIN_WORKER_UNAVAILABLE_CODE,
+  ENVIRONMENT_PROVIDER_UNAVAILABLE_CODE,
+  RUNNER_REVISION_MISMATCH_CODE,
   "low_trust_isolation_unavailable",
   "low_trust_requires_isolated_workspace",
   "low_trust_boundary_mismatch",
@@ -562,11 +580,18 @@ const NON_RETRYABLE_CONTINUATION_ERROR_CODES = new Set<string>([
 const CONTINUATION_WAITING_ON_REVIEW_ERROR_CODE =
   "issue_continuation_waiting_on_review";
 const INTERACTION_CONTINUATION_REQUEUE_MAX_ATTEMPTS = 3;
+// The accept route resolves an interaction and then enqueues its own
+// continuation wake. A sweep that reads the issue inside that gap would see an
+// accepted interaction with no wake or run and queue a second, redundant
+// continuation for the same response, which then shows as an immutable queued
+// item. Treat an accepted interaction as stranded only once its accept-time
+// wake has had time to appear.
+const INTERACTION_CONTINUATION_RECOVERY_GRACE_MS = 2 * 60_000;
 
 const CONTINUATION_RECOVERY_TRANSIENT_MAX_ATTEMPTS = 3;
 const CONTINUATION_RECOVERY_DEFAULT_MAX_ATTEMPTS = 1;
 const CONTINUATION_RECOVERY_TRANSIENT_BASE_BACKOFF_MS = 60_000;
-export const PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS = 60 * 60 * 1000;
+export const PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS = PROVIDER_LIMIT_DEFAULT_COOLDOWN_MS;
 
 const PROVIDER_QUOTA_ERROR_RE =
   /(?:you(?:'|’)ve hit your (?:\w+ )?limit|usage limit(?: reached| exceeded)?|provider quota|quota (?:limit )?exceeded|model (?:is )?at capacity)/i;
@@ -577,83 +602,6 @@ export type AdapterFailureRecoveryClassification =
   | { kind: "provider_quota"; retryAt: Date; parsedResetTime: boolean }
   | { kind: "configuration_incomplete" }
   | null;
-
-function parseProviderQuotaClockReset(error: string, now: Date) {
-  const match = error.match(
-    /(?:try again at|resets?(?:\s+at)?)\s+(\d{1,2})(?::(\d{2}))?\s*(?:([ap])\.?\s*m\.?)?(?:\s*\(([^)]+)\)|\s+([A-Z]{2,5}))?/i,
-  );
-  if (!match) return null;
-
-  const hourValue = Number.parseInt(match[1] ?? "", 10);
-  const minute = Number.parseInt(match[2] ?? "0", 10);
-  const meridiem = (match[3] ?? "").toLowerCase();
-  if (!Number.isInteger(hourValue)) return null;
-  if (
-    meridiem ? hourValue < 1 || hourValue > 12 : hourValue < 0 || hourValue > 23
-  )
-    return null;
-  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
-
-  let hour = meridiem ? hourValue % 12 : hourValue;
-  if (meridiem === "p") hour += 12;
-  const timeZone = (match[4] ?? match[5])?.trim();
-  if (!timeZone) {
-    const retryAt = new Date(now);
-    retryAt.setUTCHours(hour, minute, 0, 0);
-    if (retryAt.getTime() <= now.getTime())
-      retryAt.setUTCDate(retryAt.getUTCDate() + 1);
-    return retryAt;
-  }
-
-  try {
-    const wallClock = (date: Date) =>
-      Object.fromEntries(
-        new Intl.DateTimeFormat("en-US", {
-          timeZone,
-          hourCycle: "h23",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        })
-          .formatToParts(date)
-          .map((part) => [part.type, part.value]),
-      );
-    const nowParts = wallClock(now);
-    const buildRetryAt = (dayOffset: number) => {
-      const targetDay = new Date(
-        Date.UTC(
-          Number(nowParts.year),
-          Number(nowParts.month) - 1,
-          Number(nowParts.day) + dayOffset,
-          hour,
-          minute,
-        ),
-      );
-      let candidate = targetDay;
-      const targetMs = targetDay.getTime();
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        const actual = wallClock(candidate);
-        const actualMs = Date.UTC(
-          Number(actual.year),
-          Number(actual.month) - 1,
-          Number(actual.day),
-          Number(actual.hour),
-          Number(actual.minute),
-        );
-        const adjustment = targetMs - actualMs;
-        if (adjustment === 0) break;
-        candidate = new Date(candidate.getTime() + adjustment);
-      }
-      return candidate;
-    };
-    const sameDay = buildRetryAt(0);
-    return sameDay.getTime() > now.getTime() ? sameDay : buildRetryAt(1);
-  } catch {
-    return null;
-  }
-}
 
 export function classifyAdapterFailureForRecovery(
   latestRun: Pick<
@@ -969,6 +917,7 @@ export function recoveryService(
     ) => boolean;
     liveRunExecutions?: Readonly<{ has(id: string): boolean }>;
     beforeOrphanedRunTerminalWrite?: (runId: string) => Promise<void>;
+    beforeStaleLockClear?: (issueId: string) => Promise<void>;
   },
 ) {
   const issuesSvc = issueService(db);
@@ -2201,7 +2150,7 @@ export function recoveryService(
     return Boolean(budgetBlock);
   }
 
-  async function reconcileUnassignedBlockingIssues() {
+  async function reconcileUnassignedBlockingIssues(opts?: { companyId?: string }) {
     const candidates = await db
       .select({
         id: issues.id,
@@ -2215,6 +2164,8 @@ export function recoveryService(
       .where(
         and(
           eq(issueRelations.type, "blocks"),
+          eq(issueRelations.companyId, issues.companyId),
+          opts?.companyId ? eq(issues.companyId, opts.companyId) : undefined,
           inArray(issues.status, ["todo", "blocked"]),
           isNull(issues.assigneeAgentId),
           isNull(issues.assigneeUserId),
@@ -2380,11 +2331,7 @@ export function recoveryService(
     });
   }
 
-  async function scanSilentActiveRuns(opts?: {
-    now?: Date;
-    companyId?: string;
-    issueCreatedAtGte?: Date | null;
-  }) {
+  async function scanSilentActiveRuns(opts?: Parameters<typeof watchdog.scanSilentActiveRuns>[0]) {
     return watchdog.scanSilentActiveRuns(opts);
   }
 
@@ -2716,6 +2663,7 @@ export function recoveryService(
     const now = new Date();
     const retryAt = readProviderQuotaRetryAt(input.latestRun, now);
     return database.transaction(async (tx) => {
+      await notifyScheduledRetryDispatch(tx, { companyId: input.issue.companyId });
       const wakeup = await tx
         .insert(agentWakeupRequests)
         .values({
@@ -3316,6 +3264,7 @@ export function recoveryService(
           created = Boolean(enqueuedRun);
         } else {
           scheduledRun = await db.transaction(async (tx) => {
+            await notifyScheduledRetryDispatch(tx, { companyId: input.issue.companyId });
             const wakeup = await tx
               .insert(agentWakeupRequests)
               .values({
@@ -3497,7 +3446,7 @@ export function recoveryService(
     return Boolean(run || wake);
   }
 
-  async function reconcileActiveRecoveryActions() {
+  async function reconcileActiveRecoveryActions(opts?: { companyId?: string }) {
     const rows = await db
       .select({
         action: issueRecoveryActions,
@@ -3511,7 +3460,8 @@ export function recoveryService(
           eq(issues.companyId, issueRecoveryActions.companyId),
         ),
       )
-      .where(inArray(issueRecoveryActions.status, ["active", "escalated"]));
+      .where(and(inArray(issueRecoveryActions.status, ["active", "escalated"]),
+        opts?.companyId ? eq(issueRecoveryActions.companyId, opts.companyId) : undefined));
 
     const result = {
       requeued: 0,
@@ -3572,7 +3522,7 @@ export function recoveryService(
 
       const [sourceState, healthyChildren, hasNewSourcePath] =
         await Promise.all([
-          collectDispositionRepairSourceState(db, { issue }),
+          readDispositionRepairDurableWaitingState(db, { issue }),
           healthyOpenChildIssues(issue),
           sourceHasNewPathOutsideRecoveryAction(action),
         ]);
@@ -3844,6 +3794,7 @@ export function recoveryService(
         activeExecution: state.hasActiveExecutionPath || latest?.id !== (dispatchRunId ?? run.id),
         ownedLifecycle: run.issueCommentStatus === "retry_queued" || run.issueCommentStatus === "retry_exhausted" ||
           Boolean(readNonEmptyString(context.goalControlRequestId)) || context.resumeSessionGoalHeartbeat === true ||
+          isContextCompactionRun(context) ||
           isPluginManagedIssueLifecycle(issue) || routine.length > 0 || workspaceChildren.length > 0 ||
           Boolean(goal[0]?.status && goal[0].status !== "complete") || Boolean(active && !ownsRepair),
         conversation: Boolean(issue.conversationAgentId) || isWaitingConversation(issue),
@@ -4523,14 +4474,20 @@ export function recoveryService(
   }
 
   async function reconcileStrandedAssignedIssues(opts?: {
+    companyId?: string;
+    issueId?: string;
+    onDeferredDeadline?: (at: number) => void;
     issueCreatedAtGte?: Date | null;
     skipExternalConversationSettlement?: boolean;
+    skipRelatedRecovery?: boolean;
   }) {
     const candidates = await db
       .select(recoveryIssueFields)
       .from(issues)
       .where(
         and(
+          opts?.companyId ? eq(issues.companyId, opts.companyId) : undefined,
+          opts?.issueId ? eq(issues.id, opts.issueId) : undefined,
           isNull(issues.assigneeUserId),
           inArray(issues.status, ["todo", "in_progress", "in_review"]),
           or(
@@ -5051,6 +5008,18 @@ export function recoveryService(
         );
 
         if (!successfulRunSinceResolution) {
+          if (
+            recoveryNow.getTime() - acceptedInteractionResolvedAt.getTime() <
+            INTERACTION_CONTINUATION_RECOVERY_GRACE_MS
+          ) {
+            // Re-check at the deadline so a lost accept-time wake still recovers.
+            opts?.onDeferredDeadline?.(
+              acceptedInteractionResolvedAt.getTime() +
+                INTERACTION_CONTINUATION_RECOVERY_GRACE_MS,
+            );
+            result.skipped += 1;
+            continue;
+          }
           if (!agentInvokable) {
             result.skipped += 1;
             continue;
@@ -5711,6 +5680,7 @@ export function recoveryService(
               classification.baseBackoffMs *
               Math.pow(2, Math.max(0, consecutive - 1));
             if (elapsed < requiredDelay) {
+              opts?.onDeferredDeadline?.(latestFinishedAt.getTime() + requiredDelay);
               result.skipped += 1;
               continue;
             }
@@ -5770,16 +5740,18 @@ export function recoveryService(
       }
     }
 
-    const orphanBlockerRecovery = await reconcileUnassignedBlockingIssues();
-    result.orphanBlockersAssigned = orphanBlockerRecovery.assigned;
-    result.skipped += orphanBlockerRecovery.skipped;
-    result.issueIds.push(...orphanBlockerRecovery.issueIds);
+    if (!opts?.skipRelatedRecovery) {
+      const orphanBlockerRecovery = await reconcileUnassignedBlockingIssues(opts);
+      result.orphanBlockersAssigned = orphanBlockerRecovery.assigned;
+      result.skipped += orphanBlockerRecovery.skipped;
+      result.issueIds.push(...orphanBlockerRecovery.issueIds);
 
-    const activeRecovery = await reconcileActiveRecoveryActions();
-    result.continuationRequeued += activeRecovery.requeued;
-    result.escalated += activeRecovery.escalated;
-    result.skipped += activeRecovery.skipped;
-    result.issueIds.push(...activeRecovery.issueIds);
+      const activeRecovery = await reconcileActiveRecoveryActions(opts);
+      result.continuationRequeued += activeRecovery.requeued;
+      result.escalated += activeRecovery.escalated;
+      result.skipped += activeRecovery.skipped;
+      result.issueIds.push(...activeRecovery.issueIds);
+    }
     result.issueIds = [...new Set(result.issueIds)];
 
     return result;
@@ -5812,7 +5784,7 @@ export function recoveryService(
       source === "workspace.finalize"
         ? "workspace_finalize_reconciliation"
         : "issue_graph_liveness_reconciliation";
-    const useCursor = !opts?.blockerIssueId;
+    const useCursor = !opts?.blockerIssueId && !opts?.issueId;
 
     const queryCandidates = (afterIssueId: string | null) => {
       const filters = [
@@ -5822,6 +5794,7 @@ export function recoveryService(
         sql`${issues.assigneeAgentId} is not null`,
       ];
       if (opts?.companyId) filters.push(eq(issues.companyId, opts.companyId));
+      if (opts?.issueId) filters.push(eq(issues.id, opts.issueId));
       if (afterIssueId) filters.push(gt(issues.id, afterIssueId));
 
       if (opts?.blockerIssueId) {
@@ -6112,6 +6085,7 @@ export function recoveryService(
       // fallback below. Without it, a terminal issue named in the run context
       // snapshot would still terminalize the shared run and defeat the guard.
       runReferencedByActiveIssue?: boolean;
+      onDeferredDeadline?: (at: number) => void;
     },
   ): Promise<{ terminalized: boolean; status: string }> {
     // Act only on a run in "running" status. A "queued" run has no process yet,
@@ -6127,8 +6101,11 @@ export function recoveryService(
     // Another controller may own a sandbox run whose PID has no meaning on
     // this host. Its live lease owns both execution and finalization, even if
     // the issue is already terminal or this process has no in-memory handle.
-    if (await hasLiveLegacyController(db, run))
+    const controllerDeadline = await liveLegacyControllerExpiresAt(db, run);
+    if (controllerDeadline) {
+      options?.onDeferredDeadline?.(controllerDeadline.getTime());
       return { terminalized: false, status: run.status };
+    }
 
     const pid = run.processPid ?? null;
     const processGroupId = run.processGroupId ?? null;
@@ -6349,7 +6326,7 @@ export function recoveryService(
   // still claims to be live but can no longer reach a terminal status on its
   // own, so a stuck "running" run can no longer block the sweep. Idempotent and
   // safe: clears at most one row's worth of lock columns per candidate.
-  async function sweepStaleIssueLocks() {
+  async function sweepStaleIssueLocks(opts?: { companyId?: string; issueId?: string; onDeferredDeadline?: (at: number) => void }) {
     const result = {
       cleared: 0,
       issueIds: [] as string[],
@@ -6366,7 +6343,9 @@ export function recoveryService(
       })
       .from(issues)
       .where(
-        sql`(${issues.checkoutRunId} is not null or ${issues.executionRunId} is not null)`,
+        and(sql`(${issues.checkoutRunId} is not null or ${issues.executionRunId} is not null)`,
+          opts?.companyId ? eq(issues.companyId, opts.companyId) : undefined,
+          opts?.issueId ? eq(issues.id, opts.issueId) : undefined),
       );
 
     const referencedRunIds = [
@@ -6381,7 +6360,8 @@ export function recoveryService(
         ? await db
             .select()
             .from(heartbeatRuns)
-            .where(inArray(heartbeatRuns.id, referencedRunIds))
+            .where(and(inArray(heartbeatRuns.id, referencedRunIds),
+              opts?.companyId ? eq(heartbeatRuns.companyId, opts.companyId) : undefined))
         : [];
     const runStatusById = new Map<string, string>();
     for (const row of runRows) runStatusById.set(row.id, row.status);
@@ -6392,8 +6372,15 @@ export function recoveryService(
     // the same run id in a stale lock column. The terminal reference alone must
     // not terminalize a run that an active issue still owns, so exclude these
     // runs from the issue-terminal authority below.
+    const ownershipReferences = opts?.issueId && referencedRunIds.length > 0
+      ? await db.select({ companyId: issues.companyId, status: issues.status,
+          checkoutRunId: issues.checkoutRunId, executionRunId: issues.executionRunId }).from(issues).where(and(
+          opts.companyId ? eq(issues.companyId, opts.companyId) : undefined,
+          or(inArray(issues.checkoutRunId, referencedRunIds), inArray(issues.executionRunId, referencedRunIds)),
+        ))
+      : candidates;
     const runIdsReferencedByActiveIssue = new Set<string>();
-    for (const issue of candidates) {
+    for (const issue of ownershipReferences) {
       if (issue.status === "done" || issue.status === "cancelled") continue;
       for (const runId of [issue.checkoutRunId, issue.executionRunId]) {
         if (runId) runIdsReferencedByActiveIssue.add(runId);
@@ -6434,6 +6421,7 @@ export function recoveryService(
         referencingIssueTerminalStatus:
           issueTerminalStatusByRunId.get(row.id) ?? null,
         runReferencedByActiveIssue: runIdsReferencedByActiveIssue.has(row.id),
+        onDeferredDeadline: opts?.onDeferredDeadline,
       });
       runStatusById.set(row.id, outcome.status);
       if (outcome.terminalized) result.terminalizedRunIds.push(row.id);
@@ -6445,6 +6433,26 @@ export function recoveryService(
       if (!status) return true; // missing run row → no real claim
       return TERMINAL_HEARTBEAT_RUN_STATUSES.has(status);
     };
+    // A native failure that schedules a same-run resume marks its run failed
+    // but keeps both task locks for that resume. Clearing them lets another
+    // run take the task first, and then the resume can never run. Only a
+    // closed task releases them here.
+    const pendingResumeLock = sql<boolean>`exists (select 1 from ${nativeRunFinalizations} pending_resume
+      where pending_resume.company_id = ${issues.companyId}
+        and pending_resume.run_id in (${issues.checkoutRunId}, ${issues.executionRunId})
+        and pending_resume.phase = 'retryable_failure'
+        and pending_resume.result_id is null)`;
+    const lockRunLive = sql<boolean>`exists (select 1 from ${heartbeatRuns} lock_run
+      where lock_run.id in (${issues.checkoutRunId}, ${issues.executionRunId})
+        and lock_run.status not in (${sql.join([...TERMINAL_HEARTBEAT_RUN_STATUSES].map(status => sql`${status}`), sql`, `)}))`;
+    const pendingResumeRunIds = new Set(referencedRunIds.length === 0 ? [] : (await db
+      .select({ runId: nativeRunFinalizations.runId })
+      .from(nativeRunFinalizations)
+      .where(and(
+        inArray(nativeRunFinalizations.runId, referencedRunIds),
+        eq(nativeRunFinalizations.phase, "retryable_failure"),
+        isNull(nativeRunFinalizations.resultId),
+      ))).map(row => row.runId));
 
     for (const issue of candidates) {
       const originalOwner = issue.executionRunId ? runById.get(issue.executionRunId) : undefined;
@@ -6465,8 +6473,21 @@ export function recoveryService(
       ) {
         continue;
       }
+      const taskClosed = issue.status === "done" || issue.status === "cancelled";
+      if (!taskClosed && [issue.checkoutRunId, issue.executionRunId]
+        .some(runId => runId !== null && pendingResumeRunIds.has(runId))) {
+        continue;
+      }
 
+      await deps.beforeStaleLockClear?.(issue.id);
       const updated = await db.transaction(async tx => {
+        const [locked] = await tx.select({ id: issues.id, checkoutRunId: issues.checkoutRunId, executionRunId: issues.executionRunId })
+          .from(issues).where(and(eq(issues.companyId, issue.companyId), eq(issues.id, issue.id))).for("update");
+        if (!locked || locked.checkoutRunId !== issue.checkoutRunId || locked.executionRunId !== issue.executionRunId) return null;
+        for (const runId of new Set([locked.checkoutRunId, locked.executionRunId])) {
+          if (runId && await nativeManualAdmissionHoldsExecution(tx as unknown as Db,
+            { companyId: issue.companyId, runId, issueId: issue.id })) return null;
+        }
         await notifyUnsafeWorkspaceExportRecovery(tx, { companyId: issue.companyId, issueId: issue.id });
         await notifyNativeStatusReassessment(tx, { companyId: issue.companyId, issueId: issue.id });
         return tx
@@ -6487,6 +6508,10 @@ export function recoveryService(
             issue.executionRunId
               ? eq(issues.executionRunId, issue.executionRunId)
               : isNull(issues.executionRunId),
+            // The reads above can be stale here. A resume claim can return a
+            // referenced run to running, and a failure can schedule a resume.
+            not(lockRunLive),
+            taskClosed ? undefined : not(pendingResumeLock),
           ),
         )
         .returning({ id: issues.id })
@@ -6536,7 +6561,10 @@ export function recoveryService(
     escalateStrandedAssignedIssue,
     recordWatchdogDecision,
     scanSilentActiveRuns,
+    registerActiveRunSilenceWork: watchdog.registerSilenceWork,
     reconcileStrandedAssignedIssues,
+    reconcileUnassignedBlockingIssues,
+    reconcileActiveRecoveryActions,
     reconcileLegacyContinuation,
     legacyRepairDispatchBlock,
     sweepStaleIssueLocks,

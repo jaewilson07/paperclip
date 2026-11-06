@@ -19,8 +19,8 @@ const support = external ? { supported: true } : await getEmbeddedPostgresTestSu
   let companyId: string;
   const workers: Array<{ stop(): Promise<void> }> = [];
   beforeAll(async () => {
-    if (external) { await applyPendingMigrations(external); db = createDb(external); }
-    else { database = await startEmbeddedPostgresTestDatabase("paperclip-verification-retry-"); db = createDb(database.connectionString); }
+    if (external) { await applyPendingMigrations(external); db = createDb(external, { maxConnections: 6 }); }
+    else { database = await startEmbeddedPostgresTestDatabase("paperclip-verification-retry-"); db = createDb(database.connectionString, { maxConnections: 6 }); }
   }, 90_000);
   afterAll(async () => { if (external) await closeRegisteredClients(external); else await database?.cleanup(); });
   beforeEach(async () => {
@@ -76,12 +76,22 @@ const support = external ? { supported: true } : await getEmbeddedPostgresTestSu
 
   it("permits an explicit retry of the same operation and completes verification before readiness", async () => {
     const { agent, work, runHost } = await failed();
-    runHost.mockResolvedValue("complete");
-    await createAgentLifecycle(db).retry(agent.id);
-    expect((await current(agent.id)).lifecycleOperation).not.toHaveProperty("retryRequired");
-    expect((await current(agent.id)).lifecycleOperation).not.toHaveProperty("verificationFailures");
-    expect((await current(agent.id)).lifecycleOperation!.id).toBe(agent.lifecycleOperation!.id);
-    await work.process(agent.id);
+    let release!: () => void;
+    const verification = new Promise<void>(resolve => { release = resolve; });
+    runHost.mockImplementation(async () => { await verification; return "complete"; });
+    let processing: Promise<void> | undefined;
+    try {
+      await createAgentLifecycle(db).retry(agent.id);
+      processing = work.process(agent.id);
+      const retried = await current(agent.id);
+      expect(retried).toMatchObject({ lifecycleState: "verifying", status: "paused" });
+      expect(retried.lifecycleOperation).not.toHaveProperty("retryRequired");
+      expect(retried.lifecycleOperation).not.toHaveProperty("verificationFailures");
+      expect(retried.lifecycleOperation!.id).toBe(agent.lifecycleOperation!.id);
+    } finally {
+      release();
+      await processing;
+    }
     expect(await current(agent.id)).toMatchObject({ lifecycleState: "ready", status: "idle", lifecycleError: null });
   });
 
@@ -121,6 +131,25 @@ const support = external ? { supported: true } : await getEmbeddedPostgresTestSu
     await due();
     expect(runHost).toHaveBeenCalledTimes(3);
     expect((await current(agent.id)).lifecycleOperation).toMatchObject({ verificationFailures: 3, retryRequired: true });
+  });
+
+  it("keeps checking an outdated remote Runner past the failure budget and becomes ready once it matches", async () => {
+    const { agent, work, runHost } = await failed("runner_revision_mismatch");
+    for (let check = 0; check < 5; check++) {
+      const waiting = await current(agent.id);
+      expect(waiting).toMatchObject({ lifecycleState: "verifying", status: "paused" });
+      expect(waiting.lifecycleOperation?.retryRequired).toBeUndefined();
+      expect(waiting.lifecycleOperation?.verificationFailures).toBeUndefined();
+      expect(waiting.lifecycleOperation?.retryAt).toEqual(expect.any(String));
+      expect(waiting.lifecycleError).toContain("Runner is being updated");
+      expect(waiting.lifecycleError).not.toContain("Automatic verification is paused");
+      await db.update(agents).set({ lifecycleOperation: sql`${agents.lifecycleOperation} - 'retryAt'` }).where(eq(agents.id, agent.id));
+      await work.process(agent.id);
+    }
+    runHost.mockImplementation(async () => "complete");
+    await db.update(agents).set({ lifecycleOperation: sql`${agents.lifecycleOperation} - 'retryAt'` }).where(eq(agents.id, agent.id));
+    await work.process(agent.id);
+    expect(await current(agent.id)).toMatchObject({ lifecycleState: "ready", status: "idle", lifecycleError: null });
   });
 
   it("recovers from a generic failed test before the automatic retry budget is exhausted", async () => {

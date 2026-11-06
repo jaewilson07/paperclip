@@ -25,7 +25,7 @@ API: `present` — representative operation IDs:
 Agent access: `restricted` — Board-user REST; the responding agent gets its assigned
 conversation context.
 
-Policy: Conversation discovery/creation requires a board user and the Agent Chat gate;
+Policy: Conversation discovery/creation requires a board user;
 task access follows task visibility.
 
 Evidence: `source-only` — [implementation](../../server/src/routes/issues.ts#L18077) at
@@ -39,6 +39,30 @@ Gaps: Agents cannot enumerate or create another person's standing chats. Detail 
 missing from the generated API catalog.
 
 ## `history`
+
+Proactive publication: native `send_chat_message` and
+`POST /api/agents/me/chat/messages` accept only Markdown body and idempotency key.
+The server derives company, sender and responsible human from the authenticated
+run and atomically resolves the same per-agent/human conversation. This operation
+is available independently of generic API tools, only to active standard task
+runs with standard credentials. Skill-test and task-bridge credentials, persisted
+skill-test runs, Ask/planning/review/watchdog, stale/stopped runs, revoked recipients and
+restricted source tasks are denied. The shared comment boundary rejects other
+agents and execution-task writes that bypass this path. Comment/audit persistence
+retains real agent/run attribution and server-owned source provenance.
+Credential scope, responsible human and external authorizer remain part of access
+checks. API keys are rechecked under a row lock before the delivery commits.
+New deliveries spend the existing shared per-run cross-issue influence budget;
+receipt retries and recovery spend no extra slot. Exhaustion returns the standard 429
+denial and rolls back the attempted delivery, including first-chat creation.
+
+`GET /api/companies/{companyId}/chats` and its detail endpoint include the current
+human's unread state. `POST /api/issues/{id}/read` accepts an optional
+`throughCommentId` for the owning human's conversation. Concurrent unseen arrivals
+remain unread. Source: [delivery owner](../../server/src/services/agent-chat-messages.ts),
+[database tests](../../server/src/__tests__/agent-chat-messages.test.ts), and
+[browser journey](../../tests/e2e/agent-chat-messages.spec.ts). Test definitions
+are not evidence that a live provider or whole capability has been qualified.
 
 Capability ID: `agent-chat/history`.
 
@@ -56,7 +80,7 @@ API: `present` — representative operation IDs:
 Agent access: `partial` — Assigned conversation task tools / REST for eligible task
 history and replies.
 
-Policy: Conversation discovery/creation requires a board user and the Agent Chat gate;
+Policy: Conversation discovery/creation requires a board user;
 task access follows task visibility.
 
 Evidence: `source-only` — [implementation](../../server/src/routes/issues.ts#L18077) at
@@ -98,7 +122,7 @@ API: `present` — representative operation IDs:
 Agent access: `available` — Native list_projects/create_project/create_task; project MCP
 tools; REST.
 
-Policy: Conversation discovery/creation requires a board user and the Agent Chat gate;
+Policy: Conversation discovery/creation requires a board user;
 task access follows task visibility.
 
 Evidence: `source-only` — [implementation](../../server/src/routes/issues.ts#L18077) at
@@ -140,7 +164,7 @@ API: `present` — representative operation IDs:
 Agent access: `partial` — Existing SSE client in local_trusted mode with the
 experimental gate.
 
-Policy: Conversation discovery/creation requires a board user and the Agent Chat gate;
+Policy: Conversation discovery/creation requires a board user;
 task access follows task visibility.
 
 Evidence: `source-only` — [implementation](../../server/src/routes/issues.ts#L18077) at

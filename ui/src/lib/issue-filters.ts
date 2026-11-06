@@ -89,7 +89,7 @@ export function externalObjectFilterLabel(value: string): string {
   return EXTERNAL_OBJECT_FILTER_LABELS[value] ?? issueFilterLabel(value);
 }
 
-export const issueStatusOrder = ["in_progress", "todo", "backlog", "in_review", "blocked", "done", "cancelled"];
+export const issueStatusOrder = ["in_progress", "monitoring", "todo", "backlog", "in_review", "blocked", "done", "cancelled"];
 export const issuePriorityOrder = ["critical", "high", "medium", "low"];
 
 export const issueClosedStatuses = ["done", "cancelled"];
@@ -104,7 +104,7 @@ export const issueQuickFilterPresets: Array<{
 }> = [
   { label: "All", statuses: [], excludeStatuses: [] },
   { label: "Not closed", statuses: [], excludeStatuses: issueClosedStatuses },
-  { label: "Active", statuses: ["todo", "in_progress", "in_review", "blocked"], excludeStatuses: [] },
+  { label: "Active", statuses: ["todo", "in_progress", "monitoring", "in_review", "blocked"], excludeStatuses: [] },
   { label: "Backlog", statuses: ["backlog"], excludeStatuses: [] },
   { label: "Done", statuses: issueClosedStatuses, excludeStatuses: [] },
 ];
@@ -266,9 +266,9 @@ export function applyIssueFilters(
   if (enableAgentCreatedVisibilityFilter && !state.showAgentCreatedTasks && !state.routineTasksOnly) {
     result = result.filter((issue) => !isAgentCreatedIssue(issue));
   }
-  if (state.statuses.length > 0) result = result.filter((issue) => state.statuses.includes(issue.status));
+  if (state.statuses.length > 0) result = result.filter((issue) => state.statuses.includes(issue.displayStatus ?? issue.status));
   if (state.excludeStatuses.length > 0) {
-    result = result.filter((issue) => !state.excludeStatuses.includes(issue.status));
+    result = result.filter((issue) => !state.excludeStatuses.includes(issue.displayStatus ?? issue.status));
   }
   if (state.priorities.length > 0) result = result.filter((issue) => state.priorities.includes(issue.priority));
   if (state.assignees.length > 0) {

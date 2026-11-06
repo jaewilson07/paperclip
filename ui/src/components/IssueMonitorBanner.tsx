@@ -278,6 +278,10 @@ export function IssueMonitorBanner({
   const copy = useMonitorSurfaceCopy(issue, reviews.length);
   if (!copy) return null;
 
+  // A busy workspace is a transient system wait the user cannot act on. It stays
+  // a quiet status (composer strip, properties row), never a pinned notice.
+  if (copy.workspaceWait) return null;
+
   const canCancel = onCancelMonitor && deriveMonitorState(issue).source === "monitor";
 
   return (
@@ -323,7 +327,7 @@ export function IssueMonitorComposerStrip({
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-start gap-2">
-          <Clock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <Clock className={cn("mt-0.5 h-4 w-4 shrink-0", issue.displayStatus === "monitoring" ? "text-(--status-task-icon-monitoring)" : "text-muted-foreground")} aria-hidden="true" />
           <div className="flex min-w-0 flex-col gap-2">
             <div className="text-sm font-medium text-foreground">{copy.stripTitle}</div>
             {copy.pullRequestReview ? <IssuePullRequestLinks products={reviews} /> : null}

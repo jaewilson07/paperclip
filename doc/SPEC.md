@@ -2,6 +2,15 @@
 
 Target specification for the Paperclip control plane. Living document — updated incrementally during spec interviews.
 
+Proactive in-app updates let an active standard task or routine publish to its
+agent's persistent conversation with the run's responsible human. The server
+derives the destination, enforces current authority and company-visible chat
+privacy, and persists an attributed, idempotent comment with source-task provenance.
+Unread state belongs to the viewing human. Sending is independent of task
+completion and chat execution; future messages remain possible after `/new`.
+The V1 contract is specified under experimental task-backed agent chat in
+`doc/SPEC-implementation.md`.
+
 Experimental standalone cases provide persistent structured work records that can
 exist independently of execution. Prompt-driven handoffs move their primary
 ordinary task between agents while retaining case data and history. Existing task
@@ -150,6 +159,12 @@ Paperclip doesn't prescribe how an agent defines its identity or behavior. It pr
 ### Agent Configuration [DRAFT]
 
 Each agent has an **adapter type** and an **adapter-specific configuration blob**. The adapter defines what config fields exist.
+
+Configuration reads and changes have separate authority. `agents:read` permits
+redacted configuration and instruction reads; `agents:configure` includes reads
+and direct changes. Standard agents have read access by default. Company scope,
+explicit grant scopes, responsible-user authority and trust restrictions apply.
+See [agent permission defaults](agent-permission-defaults.md).
 
 #### Paperclip Protocol (What Paperclip Knows)
 
@@ -675,6 +690,10 @@ Chat instructions require selecting a suitable project, reusing an existing one 
 The `create_project` runtime tool uses the normal project API with durable idempotency. `list_projects` and `list_project_repositories` support selection. Multiple `repositoryIds` select authorized catalog entries; multiple HTTPS GitHub `repositoryUrls` register existing repositories absent from the catalog. IDs and URLs may be combined, but cannot accompany an explicit `workspace`. URLs do not create repositories on GitHub or grant credentials. Execution uses normal repository access rules. Repository IDs are revalidated against the authenticated run's responsible user and connection grants. Agents should consider proper available repositories, clarify material ambiguity, and use repository-free projects when appropriate for non-code work.
 
 Confirmed project creation appears as a durable card in the shared task transcript, including selected repository links. Tasks are linked inline. Failed creation never produces a success card. Tool evals cover planning/handoff, project/repository selection, retries, permission and mode denials, and ordinary delegation regressions using the production chat directive.
+
+Task replies and new tasks submit with Enter by default; Shift+Enter adds a new
+line. The **Command/Ctrl+Enter to Submit** experiment restores the previous
+keyboard behavior.
 
 ### Paused task messages
 

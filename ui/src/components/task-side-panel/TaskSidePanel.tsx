@@ -2,6 +2,7 @@ import { CoordinatorConversationTasksPanel } from "@/components/coordinator/Coor
 import { useCoordinatorWorkspaceEnabled } from "@/hooks/useCoordinatorWorkspaceEnabled";
 import { TextAttachmentContext } from "@/context/TextAttachmentContext";
 import { TaskAttachmentPanel } from "./TaskAttachmentPanel";
+import { useQueryView } from "@/components/QueryView";
 import { useTaskBrowsers } from "@/hooks/useTaskBrowsers";
 import { taskPluginPanelActivationKey, taskPluginPanelId, type TaskPluginPanel } from "@/hooks/useTaskPluginPanels";
 import { PluginSlotMount } from "@/plugins/slots";
@@ -41,7 +42,7 @@ import { PROPERTIES_PANE_HEADER_SLOT_ID } from "@/components/PropertiesPanel";
 import { WorkspaceFileBrowser } from "@/components/WorkspaceFileBrowser";
 import { AgentArtifactsPanel, AgentTasksPanel } from "@/components/chat/AgentWorkPanels";
 import { useAgentChatEnabled } from "@/hooks/useAgentChatEnabled";
-import { IssuePropertiesArtifactsTab } from "@/components/issue-properties/IssuePropertiesArtifactsTab";
+import { IssuePropertiesArtifactsTab, TaskGeneralDocuments, type TaskDocumentEditorOptions } from "@/components/issue-properties/IssuePropertiesArtifactsTab";
 import { ArtifactDropzone } from "@/components/artifacts/ArtifactDropzone";
 import { ArtifactUploadButton } from "@/components/artifacts/ArtifactUploadControls";
 import { useIssueArtifactUploads } from "@/hooks/useIssueArtifactUploads";
@@ -101,6 +102,7 @@ import { TaskSkillPanel } from "./TaskSkillPanel";
 
 export interface TaskSidePanelProps {
   issue: Issue;
+  documentEditor?: TaskDocumentEditorOptions;
   pluginPanels?: TaskPluginPanel[];
   pluginPanelsLoading?: boolean;
   openedPluginPanelKeys?: Set<string>;
@@ -265,6 +267,7 @@ function TaskSidePanelForScope({
   openBrowserId,
   onBrowserOpened,
   issue,
+  documentEditor,
   accountScope,
   childIssues = [],
   issueLinkState,
@@ -544,9 +547,10 @@ function TaskSidePanelForScope({
     }),
     queryFn: () => fileResourcesApi.list(issue.id, { workspace: "auto", mode: "recent", limit: 5, offset: 0 }),
     enabled: fileTabsEnabled && (launcherOpen || !activeTab),
-    retry: false,
     staleTime: 15_000,
   });
+
+  const recentFilesView = useQueryView(recentFilesQuery);
 
   function markInteracted() {
     userInteractedRef.current = true;
@@ -697,11 +701,11 @@ function TaskSidePanelForScope({
         label: "Recent workspace files",
         items: recentItems,
         loading: recentFilesQuery.isLoading,
-        error: recentFilesQuery.isError ? "Recent files are temporarily unavailable." : null,
+        error: recentFilesView.kind === "error" ? "Recent files are temporarily unavailable." : null,
       });
     }
     return sections;
-  }, [pluginPanels, browsersQuery.data, conversationAgentId, taskCount, taskLabel, tasksTab?.hasError, controller.tabs, documents, fileTabsEnabled, planDocument, recentFilesQuery.data, recentFilesQuery.isError, recentFilesQuery.isLoading, subtasksAvailable]);
+  }, [pluginPanels, browsersQuery.data, conversationAgentId, taskCount, taskLabel, tasksTab?.hasError, controller.tabs, documents, fileTabsEnabled, planDocument, recentFilesQuery.data, recentFilesView.kind, recentFilesQuery.isLoading, subtasksAvailable]);
 
   function selectLauncherItem(item: SidePanelLauncherItem) {
     markInteracted();
@@ -838,13 +842,20 @@ function TaskSidePanelForScope({
         : <AgentTasksPanel companyId={issue.companyId} agentId={conversationAgentId} excludeIssueId={issue.id} />
     ) : null;
   } else if (activeTab.payload.kind === "artifacts" && conversationAgentId) {
-    content = <AgentArtifactsPanel companyId={issue.companyId} agentId={conversationAgentId} />;
+    content = (
+      <div className="space-y-4">
+        <section aria-label="Conversation documents">
+          <TaskGeneralDocuments issue={issue} documentEditor={documentEditor ?? {}} />
+        </section>
+        <AgentArtifactsPanel companyId={issue.companyId} agentId={conversationAgentId} />
+      </div>
+    );
   } else if (activeTab.payload.kind === "artifacts") {
     content = <TextAttachmentContext.Provider value={(id, title) => {
       markInteracted();
       controller.openTab(taskPanelAttachmentTab(id, title));
       if (viewer.state || viewer.browse) viewer.close();
-    }}><IssuePropertiesArtifactsTab issue={issue} onOpenDocument={openDocument} uploadState={artifactUploads} /></TextAttachmentContext.Provider>;
+    }}><IssuePropertiesArtifactsTab issue={issue} documentEditor={documentEditor ?? {}} onOpenDocument={openDocument} uploadState={artifactUploads} /></TextAttachmentContext.Provider>;
   } else if (activeTab.payload.kind === "issue-document") {
     content = activeTab.payload.documentKey === "plan" && !activeTab.payload.revisionId && !activeTab.payload.documentIssueId ? (
       <IssuePropertiesPlansTab issue={issue} inline={inline} />

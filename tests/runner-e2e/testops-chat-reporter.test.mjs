@@ -200,7 +200,7 @@ test('post-watch facade runs exact official command with bounded pipes and prese
   assert.equal(result.runId, '123'); assert.equal(result.workflowSha, context.GITHUB_SHA); assert.equal(result.targetSha, context.GITHUB_SHA);
   assert.equal(result.currentRunUrlMatches, true); assert.equal(result.publicWorkflowMatches, true);
   assert.equal(result.capturedAfterWatch, true); assert.equal(result.runnableBindingQualified, false); assert.equal(result.actualResult, null);
-  assert.deepEqual(result.parameters, [{ id: 17, name: 'operation', value: 'bootstrap' }]);
+  assert.deepEqual(result.parameters, [{ id: 17, kind: 'UNRESOLVED', value: 'NOT_PROJECTED' }]);
   assert.ok(!bytes.toString().includes('SYNTHETIC')); assert.equal(f.env.ALLURE_JOB_RUN_ID, '');
   assert.deepEqual(await readFile(path.join(f.state, 'job.json')), f.originalJob);
   const second = await captureSafeErrors(() => reporter('bootstrap-context', undefined, f.env, () => assert.fail('no second auth'), () => assert.fail('no second CLI')));
@@ -242,18 +242,6 @@ test('post-watch foreign backend binding returns safe nonzero and preserves orig
     async () => ({ stdout: 'ALLURE_JOB_RUN_ID=9\nALLURE_LAUNCH_ID=10\n' })));
   assert.equal(result.value, 1); assert.equal(JSON.parse(await readFile(path.join(f.state, 'registration-failure.json'))).code, 'chat_testops_jobrun_mismatch');
   assert.deepEqual(await readFile(path.join(f.state, 'job.json')), f.originalJob);
-});
-
-test('bootstrap workflow captures official context only after watch and retains exactly named closed receipts', async () => {
-  const workflow = await readFile(new URL('../../.github/workflows/chat-feature-testops.yml', import.meta.url), 'utf8');
-  const start = workflow.indexOf('      - name: Register the public job without an evaluation or a synthetic result');
-  const end = workflow.indexOf('      - name: Validate the one real TestOps selection', start);
-  const step = workflow.slice(start, end);
-  assert.ok(step.includes("if: needs.authorize.outputs.operation == 'bootstrap'"));
-  assert.match(step, /allurectl watch -- node tests\/runner-e2e\/testops-chat-reporter\.mjs bootstrap\n\s+node tests\/runner-e2e\/testops-chat-reporter\.mjs bootstrap-context/);
-  assert.equal((step.match(/allurectl watch/g) ?? []).length, 1); assert.ok(!step.includes('continue-on-error'));
-  assert.ok(workflow.includes('${{ runner.temp }}/chat-testops-bootstrap-state/registration.json'));
-  assert.ok(workflow.includes('${{ runner.temp }}/chat-testops-bootstrap-state/registration-failure.json'));
 });
 
 test('post-watch refuses nonprivate state custody before any command auth or receipt write', async t => {

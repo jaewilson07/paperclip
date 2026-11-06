@@ -76,6 +76,31 @@ test("shared contracts, runtime prompts, protocol inputs and fixtures reach cons
   }
 });
 
+test("sandbox provider tests run only for the providers, the plugin SDK, and what the SDK imports", () => {
+  for (const file of ["packages/plugins/sandbox-providers/daytona/src/plugin.ts",
+    "packages/plugins/sandbox-providers/cloudflare/bridge-template/src/index.ts",
+    "packages/plugins/sdk/src/index.ts", "packages/shared/src/types/issue.ts"]) {
+    assert.equal(selected(plan([file]), "sandbox_provider_tests"), true, file);
+  }
+  for (const file of ["server/src/index.ts", "ui/src/components/Sidebar.tsx", "cli/src/index.ts",
+    "packages/paperclip-runner/src/index.ts", "packages/plugins/plugin-workspace-diff/src/worker.ts"]) {
+    assert.equal(selected(plan([file]), "sandbox_provider_tests"), false, file);
+  }
+  // The provider lockfiles, the shared install workspace and the runner script are global inputs.
+  for (const file of ["scripts/typecheck-sandbox-providers/pnpm-lock.yaml", "scripts/test-sandbox-providers.mjs",
+    "packages/plugins/sandbox-providers/daytona/package.json"]) {
+    assert.equal(selected(plan([file]), "sandbox_provider_tests"), true, file);
+  }
+  // The SDK depends on shared and nothing else in the workspace. A new dependency must join the inputs.
+  const sdk = JSON.parse(readFileSync(new URL("packages/plugins/sdk/package.json", root), "utf8"));
+  const workspace = Object.entries({ ...sdk.dependencies, ...sdk.peerDependencies })
+    .filter(([, version]) => String(version).startsWith("workspace:")).map(([name]) => name);
+  assert.deepEqual(workspace, ["@paperclipai/shared"]);
+  const shared = JSON.parse(readFileSync(new URL("packages/shared/package.json", root), "utf8"));
+  assert.deepEqual(Object.values({ ...shared.dependencies, ...shared.peerDependencies })
+    .filter((version) => String(version).startsWith("workspace:")), []);
+});
+
 test("renames out of source and deletions cannot masquerade as release notes", () => {
   const paths = comparisonPaths({ files: [
     { filename: "releases/v2026.1029.0.md", previous_filename: "packages/shared/src/constants.ts", status: "renamed" },
@@ -294,6 +319,10 @@ test("complete merge trees handle more than 300 files, base advancement, renames
   assert.ok(result.changed.includes("ui/src/deleted.ts")); assert.ok(result.changed.includes("ui/src/renamed.ts"));
   assert.ok(!result.changed.includes(".github/workflows/unrelated.yml"));
   assert.equal(plan(result.changed).forceReason, null);
+  const shallow = path.join(directory, "shallow");
+  git("clone", "--quiet", "--depth", "2", `file://${directory}`, shallow);
+  assert.equal(execFileSync("git", ["rev-parse", "--is-shallow-repository"], { cwd: shallow, encoding: "utf8" }).trim(), "true");
+  assert.deepEqual(mergeDiff(head, prHead, shallow), result);
   assert.throws(() => mergeDiff(head, base, directory), /expected PR head/);
   assert.throws(() => mergeDiff(prHead, prHead, directory), /merge commit/);
   assert.throws(() => mergeDiff("f".repeat(40), prHead, directory));

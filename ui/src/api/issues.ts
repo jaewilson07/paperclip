@@ -2,11 +2,13 @@ import type { SetIssueTitle } from "@paperclipai/shared";
 import { ISSUE_SUMMARIES_MAX_IDS } from "@paperclipai/shared";
 import type { IssueSummary } from "@paperclipai/shared";
 import type { ExecutionReconciliation } from "@paperclipai/shared";
+import type { IssueContextUsage } from "@paperclipai/shared";
 import type {
   AcceptedPlanDecompositionSummary,
   AskUserQuestionsAnswer,
   Approval,
   CompactIssue,
+  InboxMineSnapshot,
   CreateIssueTreeHold,
   DocumentRevision,
   FeedbackTargetType,
@@ -194,6 +196,7 @@ export type IssueListFilters = {
   projection?: "index" | "rows";
   attention?: "blocked";
   status?: string;
+  displayStatus?: string;
   projectId?: string;
   parentId?: string;
   assigneeAgentId?: string;
@@ -222,7 +225,7 @@ export type IssueListFilters = {
   q?: string;
   limit?: number;
   offset?: number;
-  sortField?: "updated" | "id";
+  sortField?: "updated" | "created" | "id";
   afterId?: string;
   sortDir?: "asc" | "desc";
 };
@@ -231,6 +234,7 @@ function issueListSearchParams(filters?: IssueListFilters) {
   const params = new URLSearchParams();
   if (filters?.attention) params.set("attention", filters.attention);
   if (filters?.status) params.set("status", filters.status);
+  if (filters?.displayStatus) params.set("displayStatus", filters.displayStatus);
   if (filters?.projectId) params.set("projectId", filters.projectId);
   if (filters?.parentId) params.set("parentId", filters.parentId);
   if (filters?.parentIds) params.set("parentIds", filters.parentIds.join(","));
@@ -282,6 +286,11 @@ function issueListSearchParams(filters?: IssueListFilters) {
 }
 
 export const issuesApi = {
+  inboxMine: (companyId: string, options?: RequestOptions) => {
+    const path = `/companies/${companyId}/inbox/mine`;
+    detachInflightGet(path);
+    return api.get<InboxMineSnapshot>(path, { ...options, cache: "no-store" });
+  },
   summaries: async (companyId: string, issueIds: readonly string[], options?: RequestOptions): Promise<IssueSummary[]> => {
     if (issueIds.length > ISSUE_SUMMARIES_MAX_IDS) throw new Error("Too many issue summary IDs");
     const ids = [...new Set(issueIds.map((id) => id.trim().toLowerCase()))].sort();
@@ -365,6 +374,9 @@ export const issuesApi = {
     options
       ? api.get<Issue>(`/issues/${id}`, options)
       : api.get<Issue>(`/issues/${id}`),
+  getContextUsage: (id: string) => api.get<IssueContextUsage | null>(`/issues/${id}/context-usage`),
+  compactContext: (id: string) =>
+    api.post<{ requestId: string; runId: string }>(`/issues/${id}/context/compact`, {}),
   getRunnerGoal: (id: string, agentId?: string | null) => {
     const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
     return api.get<RunnerGoalProjection>(`/issues/${id}/runner-goal${query}`);
@@ -380,8 +392,8 @@ export const issuesApi = {
     api.put<IssueWatchdog>(`/issues/${id}/watchdog`, data),
   deleteWatchdog: (id: string) =>
     api.delete<{ ok: true }>(`/issues/${id}/watchdog`),
-  markRead: (id: string) =>
-    api.post<{ id: string; lastReadAt: Date }>(`/issues/${id}/read`, {}),
+  markRead: (id: string, throughCommentId?: string) =>
+    api.post<{ id: string; lastReadAt: Date }>(`/issues/${id}/read`, throughCommentId ? { throughCommentId } : {}),
   markUnread: (id: string) =>
     api.delete<{ id: string; removed: boolean }>(`/issues/${id}/read`),
   archiveFromInbox: (id: string) =>

@@ -1,6 +1,12 @@
+import { admitAcpxSessionContext } from "./session-context-admission.js";
+import { createKimiInstructionAdmission } from "./kimi-instructions.js";
+import { kimiReadOnlyPermissionAllowed } from "./kimi-config.js";
+import { createGrokPromptUsageCollector } from "./grok-usage.js";
 import { resolveGrokDisableWebSearch } from "./grok-web-search.js";
 import { resolveGrokEffort, createGrokEffortAdmission } from "./grok-effort.js";
 import { resolveClaudeEffort, createClaudeEffortAdmission } from "./claude-effort.js";
+import { acpxProviderFailure } from "./provider-failure.js";
+import type { ProviderFailure } from "../../contracts/provider-failure.generated.js";
 import { createPiThinkingAdmission, resolvePiThinkingLevel } from "./pi-thinking.js";
 import { usesPreconfiguredHome } from "../preconfigured-home.js";
 import type { ChildProcess } from "node:child_process";
@@ -19,6 +25,7 @@ import {
 } from "acpx/runtime";
 
 import type {
+  AcpxPlanProposal,
   AcpxRuntimeGoalCapability,
   AcpxRuntimeGoalSnapshot,
   AcpxRuntimeSteeringCapability,
@@ -37,7 +44,6 @@ import { AcpxApprovalRequiredError, decideAcpxPermission } from "./permission-po
 import { ACPX_CAPABILITY_PROFILES } from "./capability-profiles.js";
 import { createCursorInstructionAdmission } from "./cursor-instructions.js";
 import { createAntigravityAdmission } from "./antigravity-admission.js";
-import { admitAcpxSessionContext } from "./session-context-admission.js";
 import { createAcpxModeBinding } from "./provider-mode.js";
 import { assertCopilotPromptPolicy, createCopilotProtocolGuard } from "./copilot-policy.js";
 
@@ -100,12 +106,30 @@ interface AcpxRuntimeExtensionTurn {
   promptStarted: Promise<void>;
   onRequest?: AcpRuntimeOptions["onExtensionRequest"];
   onNotification?: AcpRuntimeOptions["onExtensionNotification"];
+  onPlanProposal?: (proposal: AcpxPlanProposal) => void;
 }
 
 interface AcpxRuntimeExtensionBoundary {
   active: AcpxRuntimeExtensionTurn | null;
   sessionIds: Set<string>;
   steering: AcpxRuntimeSteeringCapability | null;
+}
+
+/**
+ * Claude Code's ExitPlanMode permission request (claude-agent-acp titles it
+ * "Approve Plan" with ACP kind `switch_mode`) carries the proposed plan as
+ * `toolCall.rawInput.plan`. Returns null for every other request.
+ */
+export function claudeExitPlanModeProposal(request: { raw?: unknown }): AcpxPlanProposal | null {
+  const raw = request.raw && typeof request.raw === "object" ? request.raw as Record<string, unknown> : {};
+  const toolCall = raw.toolCall && typeof raw.toolCall === "object" ? raw.toolCall as Record<string, unknown> : {};
+  if (toolCall.kind !== "switch_mode") return null;
+  const input = toolCall.rawInput && typeof toolCall.rawInput === "object" ? toolCall.rawInput as Record<string, unknown> : {};
+  const markdown = typeof input.plan === "string" ? input.plan.trim() : "";
+  if (!markdown) return null;
+  const toolCallId = typeof toolCall.toolCallId === "string" && toolCall.toolCallId.trim()
+    ? toolCall.toolCallId.trim() : "claude-exit-plan-mode";
+  return { toolCallId, markdown };
 }
 
 export class AcpxProviderProcessLostError extends Error {
@@ -291,6 +315,7 @@ export async function openQualifiedAcpxRuntime(
   const extensionProfile = ACPX_CAPABILITY_PROFILES[options.profile.agent];
   const extensionRequests = new Set(extensionProfile.extensionRequests);
   const extensionNotifications = new Set(extensionProfile.extensionNotifications);
+  const promptUsage = options.profile.agent === "grok" ? createGrokPromptUsageCollector() : undefined;
   const extensionBoundary: AcpxRuntimeExtensionBoundary = {
     active: null, sessionIds: new Set(), steering: null,
   };
@@ -326,17 +351,19 @@ export async function openQualifiedAcpxRuntime(
   const grokDisableWebSearch = resolveGrokDisableWebSearch(options.profile.agent, options.grokDisableWebSearch);
   const effortAdmission = selectedClaudeEffort ? createClaudeEffortAdmission(selectedClaudeEffort)
     : selectedGrokEffort ? createGrokEffortAdmission(selectedGrokEffort, options.profile.reportedModelId) : undefined;
-  const cursorInstructions = options.profile.agent === "cursor"
+  const instructionAdmission = options.profile.agent === "kimi"
+    ? createKimiInstructionAdmission(options.systemInstructions)
+    : options.profile.agent === "cursor"
     ? createCursorInstructionAdmission(options.systemInstructions)
     : null;
   const antigravityAdmission = options.profile.agent === "antigravity"
     ? createAntigravityAdmission(options.systemInstructions, options.profile.reportedModelId)
     : null;
-  const contextAdmission = cursorInstructions ?? antigravityAdmission;
+  const contextAdmission = instructionAdmission ?? antigravityAdmission;
   const runtimeOptions: GoalAwareAcpRuntimeOptions = {
     cwd: options.cwd,
-    ...(cursorInstructions || modeBinding ? { protocolGuardFactory: () => {
-      const instructions = cursorInstructions?.createGuard();
+    ...(instructionAdmission || modeBinding ? { protocolGuardFactory: () => {
+      const instructions = instructionAdmission?.createGuard();
       const mode = modeBinding?.createGuard();
       return (direction: "inbound" | "outbound", message: unknown) => { instructions?.(direction, message); mode?.(direction, message); };
     } } : {}),
@@ -412,6 +439,18 @@ export async function openQualifiedAcpxRuntime(
       }
       if ((permissionBoundary.hasAdmittedTurn && !extensionBoundary.active)
         || extensionBoundary.active?.signal.aborted || context.signal.aborted) return { outcome: "cancel" };
+      if (options.profile.agent === "claude") {
+        const plan = claudeExitPlanModeProposal(request);
+        if (plan !== null) {
+          // Paperclip owns plan approval. Record the proposal for the issue's
+          // Plan document and approval gate, then decline Claude's native
+          // "Ready to code?" prompt so the turn ends without implementing.
+          extensionBoundary.active?.onPlanProposal?.(plan);
+          return { outcome: "reject_once" };
+        }
+      }
+      if (options.profile.agent === "kimi" && options.readOnly === true
+        && !kimiReadOnlyPermissionAllowed(request, runnerOwnedMcpServerNames)) return { outcome: "reject_once" };
       const disposition = decideAcpxPermission(
         options.profile.agent,
         options.permissionMode,
@@ -458,6 +497,10 @@ export async function openQualifiedAcpxRuntime(
         : null;
     },
     onSessionNotification: acceptGoalNotification,
+    onAcpMessage: (direction, message) => {
+      const active = extensionBoundary.active;
+      if (active && (direction === "inbound" || !active.signal.aborted)) promptUsage?.observe(direction, message);
+    },
     spawnEnvironment: () => ({
       ...definedEnvironment(options.launchEnvironment),
       ...(options.profile.agent === "claude"
@@ -532,7 +575,7 @@ export async function openQualifiedAcpxRuntime(
             // Its supported exact-model control forces session/load and the
             // current instruction acknowledgement before host admission.
             if (!runtime.setConfigOption) {
-              throw new Error("ACP context admission requires exact model configuration");
+              throw new Error("Cold instruction admission requires exact model configuration");
             }
             await runtime.setConfigOption({
               handle: ensuredHandle, key: "model", value: options.profile.reportedModelId,
@@ -593,7 +636,12 @@ export async function openQualifiedAcpxRuntime(
         return ensuredHandle;
       }) : ensuredSession)
     .catch((error: unknown) => {
-      throw classifySessionEnsureFailure(error);
+      // The closed code below cannot say why the provider session did not
+      // start, so every ensure rejection keeps its redacted explanation. An
+      // abort reason is Runner cancellation, not a provider explanation.
+      const providerFailure = acpxProviderFailure(error, options.profile.agent, "startup",
+        options.launchEnvironment, options.signal?.aborted !== true);
+      throw classifySessionEnsureFailure(error, providerFailure);
     });
   let lateCleanup: Promise<void> | null = null;
   try {
@@ -608,6 +656,14 @@ export async function openQualifiedAcpxRuntime(
     modeBinding?.assertReady();
     piThinking?.assertReady();
     effortAdmission?.assertReady();
+    // A read-only (Planning) Claude run uses Claude Code's native plan mode, so
+    // the model proposes through ExitPlanMode instead of editing.
+    if (options.profile.agent === "claude" && options.readOnly === true && !preconfigured) {
+      if (!runtime.setConfigOption) throw new Error("Claude plan mode requires native mode configuration");
+      const spawnsBeforeControl = commandLaunches.count;
+      await runtime.setConfigOption({ handle, key: "mode", value: "plan" });
+      if (commandLaunches.count > spawnsBeforeControl) await commandLaunches.refreshConsumedCommand?.();
+    }
     // A provider can answer only after the verified sentinel is armed, but do
     // not admit the session until the owner has observed that exact handoff.
     await children.verifyLifetimeOwnership();
@@ -672,6 +728,7 @@ export async function openQualifiedAcpxRuntime(
       extensionBoundary,
       options.profile.agent === "copilot",
       options.profile.agent === "copilot" ? assertCopilotPromptPolicy : undefined,
+      promptUsage,
     );
   } catch (error) {
     const cleanupReason = "ACPX runtime identity validation failed";
@@ -695,20 +752,21 @@ export async function openQualifiedAcpxRuntime(
 /** Backward-compatible name retained for existing Codex-only consumers. */
 export const openCodexAcpxRuntime = openQualifiedAcpxRuntime;
 
-function classifySessionEnsureFailure(error: unknown): Error {
-  if (error instanceof Error) {
-    const details = error as Error & Record<string, unknown>;
-    if (typeof details.code !== "string" || details.code.length === 0) {
-      details.code =
-        error instanceof TypeError
-          ? "ACPX_SESSION_ENSURE_TYPE_ERROR"
-          : "ACPX_SESSION_ENSURE_FAILED";
-    }
-    return error;
+function classifySessionEnsureFailure(error: unknown, providerFailure: ProviderFailure | null): Error {
+  const failure = error instanceof Error ? error
+    : Object.assign(new Error("ACPX session ensure rejected a non-error"), { code: "ACPX_SESSION_ENSURE_NON_ERROR" });
+  const details = failure as Error & Record<string, unknown>;
+  if (typeof details.code !== "string" || details.code.length === 0) {
+    details.code =
+      failure instanceof TypeError
+        ? "ACPX_SESSION_ENSURE_TYPE_ERROR"
+        : "ACPX_SESSION_ENSURE_FAILED";
   }
-  return Object.assign(new Error("ACPX session ensure rejected a non-error"), {
-    code: "ACPX_SESSION_ENSURE_NON_ERROR",
-  });
+  // Keep a cause that an inner layer already attached.
+  if (providerFailure && !Object.hasOwn(failure, "providerFailure")) {
+    Object.defineProperty(failure, "providerFailure", { value: providerFailure, enumerable: false });
+  }
+  return failure;
 }
 
 function raceRuntimeHandshakeWithAbort<T>(
@@ -1103,6 +1161,7 @@ function runtimePort(
   extensionBoundary: AcpxRuntimeExtensionBoundary,
   monitorProviderDeath: boolean,
   assertPromptPolicy?: (text: string) => void,
+  promptUsage?: ReturnType<typeof createGrokPromptUsageCollector>,
 ): AcpxRuntimePort {
   extensionBoundary.sessionIds = new Set([identity.backendSessionId]);
   let extensionControls: Promise<void> = Promise.resolve();
@@ -1361,7 +1420,8 @@ function runtimePort(
       return structuredClone(identity);
     },
     async getStatus() {
-      return await persistedRuntimeStatus(sessionStore, handle, identity);
+      const status = await persistedRuntimeStatus(sessionStore, handle, identity);
+      return promptUsage ? { ...status, terminalPromptUsage: promptUsage.snapshot() } : status;
     },
     steeringCapability() {
       return extensionBoundary.steering === null ? null : structuredClone(extensionBoundary.steering);
@@ -1472,8 +1532,10 @@ function runtimePort(
         signal: input.signal ? AbortSignal.any([controller.signal, input.signal, approval.signal]) : AbortSignal.any([controller.signal, approval.signal]),
         promptStarted: Promise.resolve(),
         onRequest: input.onExtensionRequest, onNotification: input.onExtensionNotification,
+        onPlanProposal: input.onPlanProposal,
       };
       extensionBoundary.active = extensionTurn;
+      promptUsage?.begin(input.requestId, identity.backendSessionId);
       // A guardian can outlive the provider while ACP awaits a callback.
       // Native exit or a typed ACP agent disconnect retires this turn; losing
       // the controller connection must preserve deliverable input instead.
@@ -1513,6 +1575,9 @@ function runtimePort(
             : approval.signal,
           ...(input.onElicitation
             ? { onElicitation: input.onElicitation }
+            : {}),
+          ...(input.onTerminalSessionFailure
+            ? { onTerminalSessionFailure: input.onTerminalSessionFailure }
             : {}),
         });
       } catch (error) {

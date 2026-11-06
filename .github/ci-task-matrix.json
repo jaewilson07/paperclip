@@ -140,6 +140,11 @@
       "task": "ci:docker"
     }
   ],
+  "sandbox_provider_tests": [
+    {
+      "task": "ci:sandbox-providers"
+    }
+  ],
   "verify_paperclip_runner": [
     {
       "lane_label": "static checks",
@@ -153,12 +158,12 @@
       "task": "ci:runner-rust"
     },
     {
-      "lane_label": "vitest 1/2",
+      "lane_label": "vitest package",
       "command": "test:typescript:vitest --shard=1/2",
       "task": "ci:runner-vitest"
     },
     {
-      "lane_label": "vitest 2/2",
+      "lane_label": "vitest native server",
       "command": "test:typescript:vitest --shard=2/2",
       "release_crate": true,
       "task": "ci:runner-vitest"
